@@ -446,6 +446,18 @@ test('fetchMailboxEnvelopes prefers payload.items over string-only payload.envel
     );
     assert.equal(synced.envelopes.length, 1);
     assert.equal(synced.envelopes[0].decodedPayload.cardTitle, 'Lab Result Ready');
+
+    const { baseUrl, close } = await startAppTestServer({
+      nodeApiBaseUrl: `http://127.0.0.1:${mockNode.address().port}`,
+      appHttpPort: 0,
+    });
+    try {
+      const inbox = await httpRequest(`${baseUrl}/inbox?mailboxId=did:sonaraim:alice`);
+      assert.equal(inbox.status, 200);
+      assert.match(inbox.body, /Lab Result Ready/);
+    } finally {
+      await close();
+    }
   } finally {
     await new Promise((r) => mockNode.close(() => r()));
   }

@@ -155,11 +155,24 @@ export function createAppRequestHandler(config) {
         const synced = await fetchMailboxEnvelopes(config.nodeApiBaseUrl, mailboxId, 1500);
         for (const env of synced.envelopes) {
           const payload = env.decodedPayload;
-          if (payload && (payload.tenantDid || payload.title)) {
+          const cardObj = payload?.card && typeof payload.card === 'object' ? payload.card : null;
+          const cardTitle = payload?.title ?? payload?.cardTitle ?? cardObj?.title;
+          const cardTenant =
+            payload?.tenantDid ?? payload?.tenant_did ?? cardObj?.tenant_did ?? cardObj?.tenantDid;
+          if (payload && (cardTenant || cardTitle)) {
+            const rawActions = Array.isArray(payload.actions)
+              ? payload.actions
+              : Array.isArray(cardObj?.actions)
+                ? cardObj.actions
+                    .map((a) => (typeof a === 'string' ? a : a?.label))
+                    .filter(Boolean)
+                : payload.actionLabel
+                  ? [String(payload.actionLabel)]
+                  : ['View'];
             serviceCards.push({
-              tenantDid: String(payload.tenantDid || defaultMerchantDid),
-              title: String(payload.title || 'Verified Service Card'),
-              actions: Array.isArray(payload.actions) ? payload.actions : ['View'],
+              tenantDid: String(cardTenant || defaultMerchantDid),
+              title: String(cardTitle || 'Verified Service Card'),
+              actions: rawActions.length > 0 ? rawActions : ['View'],
               clipToken: payload.clipToken,
             });
           } else {
