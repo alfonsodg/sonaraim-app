@@ -14,6 +14,7 @@ import {
   readRequestBody,
   prefersJson,
   handlePasskeyAuthRoutes,
+  handleDiscoveryAndCallRoutes,
 } from './apiRoutes.mjs';
 
 /**
@@ -91,6 +92,16 @@ export function createAppRequestHandler(config) {
     }
 
     if (await handlePasskeyAuthRoutes(req, res, url, { challengeStore, sessionSecret })) {
+      return;
+    }
+
+    if (
+      await handleDiscoveryAndCallRoutes(req, res, url, {
+        nodeApiBaseUrl: config.nodeApiBaseUrl,
+        livekitUrl: config.livekitUrl,
+        sessionSecret,
+      })
+    ) {
       return;
     }
 

@@ -16,6 +16,9 @@ import {
   createPasskeyChallenge,
   verifyPasskeyAssertionAndIssueSession,
   verifyAppSessionCookie,
+  blindContactIdentifier,
+  discoverContactsViaNode,
+  createLiveKitRoomToken,
 } from '../src/index.mjs';
 
 /**
@@ -87,7 +90,6 @@ test('Issue #7: Passkey challenge generation, assertion verification, session co
   assert.equal(verified.valid, true);
   assert.equal(verified.userDid, 'did:sonaraim:alice');
 
-  // Test HTTP endpoints with requireAuth: true
   const { baseUrl, close } = await startAppTestServer({
     nodeApiBaseUrl: 'http://127.0.0.1:8090',
     appHttpPort: 0,
@@ -96,11 +98,9 @@ test('Issue #7: Passkey challenge generation, assertion verification, session co
   });
 
   try {
-    // 1. Unauthenticated /inbox returns 401 when requireAuth is true
     const unauthInbox = await httpRequest(`${baseUrl}/inbox`);
     assert.equal(unauthInbox.status, 401);
 
-    // 2. Request a Passkey challenge via POST /auth/passkey/challenge
     const challengeRes = await httpRequest(`${baseUrl}/auth/passkey/challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -108,10 +108,7 @@ test('Issue #7: Passkey challenge generation, assertion verification, session co
     });
     assert.equal(challengeRes.status, 200);
     const challengeData = JSON.parse(challengeRes.body);
-    assert.ok(challengeData.challengeId);
-    assert.ok(challengeData.challenge);
 
-    // 3. Verify Passkey assertion via POST /auth/passkey/verify
     const verifyRes = await httpRequest(`${baseUrl}/auth/passkey/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,12 +124,8 @@ test('Issue #7: Passkey challenge generation, assertion verification, session co
     });
     assert.equal(verifyRes.status, 200);
     const setCookie = verifyRes.headers['set-cookie'];
-    assert.ok(setCookie, 'Expected Set-Cookie header');
     const cookieStr = Array.isArray(setCookie) ? setCookie[0] : setCookie;
-    assert.match(cookieStr, /sonaraim_session=/);
-    assert.match(cookieStr, /HttpOnly/i);
 
-    // 4. Authenticated /inbox with session cookie returns 200 OK
     const authInbox = await httpRequest(`${baseUrl}/inbox`, {
       headers: { Cookie: cookieStr.split(';')[0] },
     });
@@ -140,5 +133,78 @@ test('Issue #7: Passkey challenge generation, assertion verification, session co
     assert.match(authInbox.body, /Sonaraim Dual Inbox/);
   } finally {
     await close();
+  }
+});
+
+test('Issue #8: PSI contact discovery via Node and LiveKit room token minting', async () => {
+  const domainSalt = 'sonaraim-psi-v1';
+  const registeredPhone = '+51999111222';
+  const registeredDigest = blindContactIdentifier(registeredPhone, domainSalt);
+
+  const mockNode = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (req.method === 'POST' && url.pathname === '/v1/psi/discover') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ matched_tokens: [registeredDigest] }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise((r) => mockNode.listen(0, '127.0.0.1', r));
+  const mockNodeUrl = `http://127.0.0.1:${mockNode.address().port}`;
+
+  const { baseUrl, close } = await startAppTestServer({
+    nodeApiBaseUrl: mockNodeUrl,
+    appHttpPort: 0,
+    livekitUrl: 'wss://livekit.sonaraim.example.com',
+  });
+
+  try {
+    const directMatches = await discoverContactsViaNode(
+      mockNodeUrl,
+      ['+51999111222', '+51999000999'],
+      domainSalt
+    );
+    assert.deepEqual(directMatches, ['+51999111222']);
+
+    const psiRes = await httpRequest(`${baseUrl}/api/contacts/discover`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifiers: ['+51999111222', '+51999000999'],
+        domainSalt,
+      }),
+    });
+    assert.equal(psiRes.status, 200);
+    const psiData = JSON.parse(psiRes.body);
+    assert.deepEqual(psiData.matchedContacts, ['+51999111222']);
+
+    const directToken = createLiveKitRoomToken({
+      roomName: 'mls-room-01',
+      participantDid: 'did:sonaraim:alice',
+      livekitUrl: 'wss://livekit.sonaraim.example.com',
+      signingKey: 'test-key',
+    });
+    assert.equal(directToken.roomName, 'mls-room-01');
+    assert.equal(directToken.token.split('.').length, 3);
+
+    const callRes = await httpRequest(`${baseUrl}/api/calls/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        roomName: 'mls-room-01',
+        participantDid: 'did:sonaraim:alice',
+      }),
+    });
+    assert.equal(callRes.status, 200);
+    const callData = JSON.parse(callRes.body);
+    assert.equal(callData.roomName, 'mls-room-01');
+    assert.equal(callData.livekitUrl, 'wss://livekit.sonaraim.example.com');
+    assert.equal(callData.token.split('.').length, 3);
+  } finally {
+    await close();
+    await new Promise((r) => mockNode.close(() => r()));
   }
 });

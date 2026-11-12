@@ -7,6 +7,10 @@ import {
   createPasskeyChallenge,
   verifyPasskeyAssertionAndIssueSession,
 } from './passkeySession.mjs';
+import {
+  discoverContactsViaNode,
+  createLiveKitRoomToken,
+} from './contactDiscovery.mjs';
 
 /**
  * Reads and parses the incoming HTTP request body (supports JSON and application/x-www-form-urlencoded).
@@ -115,6 +119,58 @@ export async function handlePasskeyAuthRoutes(req, res, url, authCtx) {
       );
     } catch (err) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Handles PSI contact discovery (`/api/contacts/discover`) and LiveKit room token (`/api/calls/token`) routes.
+ *
+ * @param {import('node:http').IncomingMessage} req - Incoming HTTP request.
+ * @param {import('node:http').ServerResponse} res - Outgoing HTTP response.
+ * @param {URL} url - Parsed request URL.
+ * @param {{ nodeApiBaseUrl: string, livekitUrl?: string, sessionSecret: string }} ctx - App runtime context.
+ * @returns {Promise<boolean>} True if the route was handled.
+ */
+export async function handleDiscoveryAndCallRoutes(req, res, url, ctx) {
+  if (req.method === 'POST' && url.pathname === '/api/contacts/discover') {
+    const body = await readRequestBody(req);
+    const identifiers = Array.isArray(body.identifiers)
+      ? body.identifiers
+      : typeof body.identifiers === 'string'
+        ? body.identifiers.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+    const domainSalt = String(body.domainSalt || 'sonaraim-psi-v1').trim();
+    const matchedContacts = await discoverContactsViaNode(
+      ctx.nodeApiBaseUrl,
+      identifiers,
+      domainSalt
+    );
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ matchedContacts, domainSalt }));
+    return true;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/calls/token') {
+    const body = await readRequestBody(req);
+    try {
+      const descriptor = createLiveKitRoomToken({
+        roomName: String(body.roomName || 'sonaraim-default-room'),
+        participantDid: String(body.participantDid || 'did:sonaraim:caller'),
+        livekitUrl:
+          ctx.livekitUrl ||
+          process.env.PUBLIC_LIVEKIT_URL ||
+          'wss://livekit.sonaraim.internal',
+        signingKey: ctx.sessionSecret,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(descriptor));
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }
     return true;

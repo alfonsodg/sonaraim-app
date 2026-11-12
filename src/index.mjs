@@ -1,7 +1,8 @@
 /**
  * @fileoverview SonarAIM Client Core SDK entry point.
  * Re-exports the Dual Inbox router, Zero-HTML Declarative Card renderer,
- * Passkey WebAuthn PRF Zero-Knowledge Vault, Passkey Session manager, and Node relay client modules.
+ * Passkey WebAuthn PRF Zero-Knowledge Vault, Passkey Session manager,
+ * PSI Contact Discovery / LiveKit token helper, and Node relay client modules.
  */
 
 export {
@@ -28,7 +29,9 @@ export { renderInboxView } from './ui/inboxView.mjs';
 export { renderInstantClipView } from './ui/instantClipView.mjs';
 export {
   blindContactIdentifier,
-  intersectDiscoveredContacts
+  intersectDiscoveredContacts,
+  discoverContactsViaNode,
+  createLiveKitRoomToken
 } from './contactDiscovery.mjs';
 export { fetchMailboxEnvelopes } from './nodeClient.mjs';
 export {
