@@ -423,3 +423,30 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
     await close();
   }
 });
+
+test('fetchMailboxEnvelopes prefers payload.items over string-only payload.envelopes', async () => {
+  const hex = Buffer.from(
+    JSON.stringify({ tenant_did: 'did:web:clinic.example.com', cardTitle: 'Lab Result Ready' }),
+    'utf8'
+  ).toString('hex');
+  const mockNode = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        envelopes: ['env_b2b_1'],
+        items: [{ envelope_id: 'env_b2b_1', recipient_mailbox_id: 'did:sonaraim:alice', payload_hex: hex }],
+      })
+    );
+  });
+  await new Promise((r) => mockNode.listen(0, '127.0.0.1', r));
+  try {
+    const synced = await fetchMailboxEnvelopes(
+      `http://127.0.0.1:${mockNode.address().port}`,
+      'did:sonaraim:alice'
+    );
+    assert.equal(synced.envelopes.length, 1);
+    assert.equal(synced.envelopes[0].decodedPayload.cardTitle, 'Lab Result Ready');
+  } finally {
+    await new Promise((r) => mockNode.close(() => r()));
+  }
+});

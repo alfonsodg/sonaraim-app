@@ -41,10 +41,10 @@ export async function fetchMailboxEnvelopes(nodeApiBaseUrl, mailboxId, timeoutMs
     const payload = await response.json();
     const rawList = Array.isArray(payload)
       ? payload
-      : Array.isArray(payload?.envelopes)
-        ? payload.envelopes
-        : Array.isArray(payload?.items)
-          ? payload.items
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.envelopes)
+          ? payload.envelopes
           : Array.isArray(payload?.messages)
             ? payload.messages
             : [];
