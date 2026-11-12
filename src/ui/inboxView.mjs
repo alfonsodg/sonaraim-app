@@ -1,15 +1,15 @@
 /**
  * @fileoverview Dual Inbox & Declarative Card UI renderer separating Personal (`did:sonaraim`)
- * and Verified Services (`did:web`) streams.
+ * and Verified Services (`did:web`) streams with interactive P2P messaging.
  */
 
 import { escapeHtml, renderAppShell } from './htmlUtils.mjs';
 
 /**
  * Renders the Dual Inbox HTML view with strict escaping of message previews, interactive
- * card action forms, and 1-tap promotional consent revocation controls.
+ * card action forms, 1-tap consent revocation, and P2P message sender form.
  *
- * @param {object} state - Inbox snapshot.
+ * @param {object} [state] - Inbox snapshot.
  * @param {Array<{from: string, preview: string}>} [state.personalMessages]
  * @param {Array<{tenantDid: string, title: string, actions?: string[], clipToken?: string}>} [state.serviceCards]
  * @param {{tenantDid: string, revokedAt: string}} [state.revocationReceipt] - Optional consent revocation receipt.
@@ -19,7 +19,7 @@ export function renderInboxView({
   personalMessages = [],
   serviceCards = [],
   revocationReceipt = null,
-}) {
+} = {}) {
   const bannerHtml = revocationReceipt
     ? `<div class="banner" role="status" aria-live="polite">
         <strong>Consent revoked for</strong> <code>${escapeHtml(revocationReceipt.tenantDid)}</code>
@@ -30,9 +30,16 @@ export function renderInboxView({
   const personalRows = personalMessages
     .map(
       (msg) =>
-        `<li><strong>${escapeHtml(msg.from)}</strong>: ${escapeHtml(msg.preview)}</li>`
+        `<li><strong>${escapeHtml(msg.from)}</strong>: <span>${escapeHtml(msg.preview)}</span></li>`
     )
     .join('');
+
+  const sendFormHtml = `
+    <form method="POST" action="/inbox/messages" style="display:flex; flex-direction:column; gap:0.5rem; margin-top:1rem;">
+      <input type="text" name="recipientDid" placeholder="Recipient DID (e.g. did:sonaraim:bob)" required />
+      <input type="text" name="text" placeholder="Type an encrypted message..." required />
+      <button type="submit" style="align-self:flex-start;">Send Message</button>
+    </form>`;
 
   const serviceRows = serviceCards
     .map((card) => {
@@ -54,7 +61,11 @@ export function renderInboxView({
         <button type="submit">Revoke Consent</button>
       </form>`;
 
-      return `<article><h3>${escapeHtml(card.title)}</h3><p><code>${safeTenant}</code></p><div>${actionForms} ${revokeForm}</div></article>`;
+      return `<article style="margin-bottom:1rem; border-top:1px solid #1f2937; padding-top:0.75rem;">
+        <h3>${escapeHtml(card.title)}</h3>
+        <p><code>${safeTenant}</code></p>
+        <div>${actionForms} ${revokeForm}</div>
+      </article>`;
     })
     .join('');
 
@@ -62,6 +73,7 @@ export function renderInboxView({
     <section aria-labelledby="personal-stream">
       <h2 id="personal-stream">Personal Stream</h2>
       <ul>${personalRows}</ul>
+      ${sendFormHtml}
     </section>
     <section aria-labelledby="services-stream">
       <h2 id="services-stream">Verified Services</h2>

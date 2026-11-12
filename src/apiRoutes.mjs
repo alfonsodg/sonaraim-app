@@ -11,6 +11,7 @@ import {
   discoverContactsViaNode,
   createLiveKitRoomToken,
 } from './contactDiscovery.mjs';
+import { sendP2pEnvelopeToNode } from './nodeClient.mjs';
 
 /**
  * Reads and parses the incoming HTTP request body (supports JSON and application/x-www-form-urlencoded).
@@ -174,6 +175,62 @@ export async function handleDiscoveryAndCallRoutes(req, res, url, ctx) {
       res.end(JSON.stringify({ error: err.message }));
     }
     return true;
+  }
+
+  return false;
+}
+
+/**
+ * Handles sending live P2P messages to a Sonaraim Node relay via `POST /inbox/messages`.
+ *
+ * @param {import('node:http').IncomingMessage} req - Incoming HTTP request.
+ * @param {import('node:http').ServerResponse} res - Outgoing HTTP response.
+ * @param {URL} url - Parsed request URL.
+ * @param {{ nodeApiBaseUrl: string }} ctx - App runtime context.
+ * @returns {Promise<boolean>} True if the route was handled.
+ */
+export async function handleInboxMessageRoutes(req, res, url, ctx) {
+  if (req.method === 'POST' && url.pathname === '/inbox/messages') {
+    const body = await readRequestBody(req);
+    const senderDid = String(body.senderDid || body.sender_did || 'did:sonaraim:user').trim();
+    const recipientDid = String(body.recipientDid || body.recipient_did || '').trim();
+    const text = String(body.text || body.preview || '').trim();
+
+    if (!recipientDid) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'recipientDid is required' }));
+      return true;
+    }
+
+    try {
+      const dispatched = await sendP2pEnvelopeToNode(ctx.nodeApiBaseUrl, {
+        senderDid,
+        recipientDid,
+        text,
+      });
+
+      if (prefersJson(req)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: 'sent',
+            envelopeId: dispatched.envelope_id,
+            recipientDid,
+          })
+        );
+        return true;
+      }
+
+      res.writeHead(303, {
+        Location: `/inbox?mailboxId=${encodeURIComponent(recipientDid)}`,
+      });
+      res.end();
+      return true;
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+      return true;
+    }
   }
 
   return false;

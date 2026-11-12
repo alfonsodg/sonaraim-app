@@ -41,11 +41,12 @@ export function renderAppShell({ title, contentHtml }) {
     header { padding:1rem 1.25rem; border-bottom:1px solid #1f2937; }
     main { max-width:960px; margin:0 auto; padding:1.25rem; display:grid; gap:1rem; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); }
     section { background:var(--card); border:1px solid #1f2937; border-radius:12px; padding:1rem; overflow-wrap:anywhere; }
-    form { display:inline-block; margin:0.25rem 0.25rem 0 0; }
+    form { display:inline-block; margin:0.25rem 0.25rem 0 0; max-width:100%; }
+    input, select, textarea { max-width:100%; border:1px solid #374151; border-radius:6px; padding:0.45rem 0.6rem; background:#1f2937; color:#f3f4f6; }
     button { background:var(--accent); color:#042f2e; border:none; border-radius:8px; padding:0.5rem 0.9rem; font-weight:600; cursor:pointer; }
     .banner { background:#064e3b; color:#ecfdf5; border:1px solid #10b981; border-radius:8px; padding:0.75rem 1rem; margin-bottom:1rem; overflow-wrap:anywhere; }
     @media (max-width:768px) { main { padding:0.9rem; } }
-    @media (max-width:375px) { header { padding:0.75rem; } }
+    @media (max-width:375px) { header { padding:0.75rem; } main { padding:0.75rem; } }
   </style>
 </head>
 <body>

@@ -7,7 +7,7 @@
 
 export {
   resolveInboxConfig,
-  DualInboxRouter
+  DualInboxRouter,
 } from './dualInbox.mjs';
 
 export {
@@ -15,31 +15,39 @@ export {
   canonicalizeJson,
   verifyCardSignature,
   renderDeclarativeCard,
-  createSignedCardAction
+  createSignedCardAction,
 } from './cardRenderer.mjs';
 
 export {
   resolveVaultConfig,
   deriveVaultKey,
   encryptVaultBlob,
-  decryptVaultBlob
+  decryptVaultBlob,
 } from './zkVault.mjs';
 
 export { renderInboxView } from './ui/inboxView.mjs';
 export { renderInstantClipView } from './ui/instantClipView.mjs';
+export { escapeHtml, renderAppShell } from './ui/htmlUtils.mjs';
+
 export {
   blindContactIdentifier,
   intersectDiscoveredContacts,
   discoverContactsViaNode,
-  createLiveKitRoomToken
+  createLiveKitRoomToken,
 } from './contactDiscovery.mjs';
-export { fetchMailboxEnvelopes } from './nodeClient.mjs';
+
+export {
+  fetchMailboxEnvelopes,
+  sendP2pEnvelopeToNode,
+} from './nodeClient.mjs';
+
 export {
   createPasskeyChallenge,
   verifyPasskeyAssertionAndIssueSession,
-  verifyAppSessionCookie
+  verifyAppSessionCookie,
 } from './passkeySession.mjs';
+
 export {
   createAppRequestHandler,
-  startAppTestServer
+  startAppTestServer,
 } from './server.mjs';

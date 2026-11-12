@@ -19,6 +19,8 @@ import {
   blindContactIdentifier,
   discoverContactsViaNode,
   createLiveKitRoomToken,
+  fetchMailboxEnvelopes,
+  sendP2pEnvelopeToNode,
 } from '../src/index.mjs';
 
 /**
@@ -203,6 +205,101 @@ test('Issue #8: PSI contact discovery via Node and LiveKit room token minting', 
     assert.equal(callData.roomName, 'mls-room-01');
     assert.equal(callData.livekitUrl, 'wss://livekit.sonaraim.example.com');
     assert.equal(callData.token.split('.').length, 3);
+  } finally {
+    await close();
+    await new Promise((r) => mockNode.close(() => r()));
+  }
+});
+
+test('Issue #9: decode live Node items[].payload_hex into Dual Inbox streams and send P2P messages via POST /inbox/messages', async () => {
+  /** @type {Array<Record<string, any>>} */
+  const storedItems = [
+    {
+      envelope_id: 'env-card-b2b-1',
+      payload_hex: Buffer.from(
+        JSON.stringify({
+          tenantDid: 'did:web:store.example.com',
+          title: 'Package Dispatched #771',
+          actions: ['Track Package', 'Confirm Delivery'],
+          clipToken: 'clip_pkg_771',
+        }),
+        'utf8'
+      ).toString('hex'),
+    },
+  ];
+
+  const mockNode = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (req.method === 'GET' && url.pathname.startsWith('/v1/relay/mailboxes/')) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ items: storedItems }));
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/relay/envelopes') {
+      let body = '';
+      req.on('data', (c) => {
+        body += c;
+      });
+      req.on('end', () => {
+        const parsed = JSON.parse(body);
+        storedItems.push({
+          envelope_id: parsed.envelope_id || 'env-p2p-1',
+          recipient_did: parsed.recipient_did || parsed.mailbox_id,
+          payload_hex: parsed.payload_hex,
+        });
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'queued', envelope_id: 'env-p2p-1' }));
+      });
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+
+  await new Promise((r) => mockNode.listen(0, '127.0.0.1', r));
+  const mockNodeUrl = `http://127.0.0.1:${mockNode.address().port}`;
+
+  const { baseUrl, close } = await startAppTestServer({
+    nodeApiBaseUrl: mockNodeUrl,
+    appHttpPort: 0,
+  });
+
+  try {
+    // 1. Send P2P message via POST /inbox/messages (JSON)
+    const sendRes = await httpRequest(`${baseUrl}/inbox/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        senderDid: 'did:sonaraim:alice',
+        recipientDid: 'did:sonaraim:bob',
+        text: 'Dinner at 8pm?',
+      }),
+    });
+    assert.equal(sendRes.status, 200);
+    const sendJson = JSON.parse(sendRes.body);
+    assert.equal(sendJson.status, 'sent');
+
+    // 2. Also verify direct helper sendP2pEnvelopeToNode
+    const directSend = await sendP2pEnvelopeToNode(mockNodeUrl, {
+      senderDid: 'did:sonaraim:dave',
+      recipientDid: 'did:sonaraim:bob',
+      text: 'See you tomorrow!',
+    });
+    assert.equal(directSend.delivered, true);
+
+    // 3. Verify fetchMailboxEnvelopes decodes payload_hex
+    const synced = await fetchMailboxEnvelopes(mockNodeUrl, 'did:sonaraim:bob');
+    assert.equal(synced.envelopes.length, 3);
+    assert.equal(synced.envelopes[0].decodedPayload.title, 'Package Dispatched #771');
+
+    // 4. Verify GET /inbox?mailboxId=did:sonaraim:bob renders both decoded B2B card & P2P messages
+    const inboxRes = await httpRequest(`${baseUrl}/inbox?mailboxId=did:sonaraim:bob`);
+    assert.equal(inboxRes.status, 200);
+    assert.match(inboxRes.body, /Package Dispatched #771/);
+    assert.match(inboxRes.body, /did:web:store\.example\.com/);
+    assert.match(inboxRes.body, /Dinner at 8pm\?/);
+    assert.match(inboxRes.body, /See you tomorrow!/);
+    assert.match(inboxRes.body, /<form[^>]*method="POST"[^>]*action="\/inbox\/messages"/i);
   } finally {
     await close();
     await new Promise((r) => mockNode.close(() => r()));

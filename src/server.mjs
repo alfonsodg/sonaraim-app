@@ -5,16 +5,14 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { renderInboxView } from './ui/inboxView.mjs';
-import { renderInstantClipView } from './ui/instantClipView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
-import { createSignedCardAction } from './cardRenderer.mjs';
 import { fetchMailboxEnvelopes } from './nodeClient.mjs';
 import { verifyAppSessionCookie } from './passkeySession.mjs';
+import { handleClipAndConsentRoutes } from './clipRoutes.mjs';
 import {
-  readRequestBody,
-  prefersJson,
   handlePasskeyAuthRoutes,
   handleDiscoveryAndCallRoutes,
+  handleInboxMessageRoutes,
 } from './apiRoutes.mjs';
 
 /**
@@ -25,7 +23,8 @@ import {
  *   appHttpPort: number,
  *   b2bApiBaseUrl?: string,
  *   requireAuth?: boolean,
- *   sessionSecret?: string
+ *   sessionSecret?: string,
+ *   livekitUrl?: string
  * }} config
  * @returns {http.RequestListener}
  */
@@ -105,6 +104,10 @@ export function createAppRequestHandler(config) {
       return;
     }
 
+    if (await handleInboxMessageRoutes(req, res, url, { nodeApiBaseUrl: config.nodeApiBaseUrl })) {
+      return;
+    }
+
     const mailboxMatch = url.pathname.match(/^\/api\/mailbox\/([^/]+)$/);
     if (req.method === 'GET' && mailboxMatch) {
       const mailboxId = decodeURIComponent(mailboxMatch[1]).trim();
@@ -126,116 +129,58 @@ export function createAppRequestHandler(config) {
       }
 
       const personalMessages = [{ from: 'did:sonaraim:bob', preview: 'Encrypted MLS hello' }];
+      const serviceCards = [];
       const mailboxId = String(url.searchParams.get('mailboxId') ?? '').trim();
+
       if (mailboxId) {
         counters.mailboxSyncTotal += 1;
         const synced = await fetchMailboxEnvelopes(config.nodeApiBaseUrl, mailboxId, 1500);
         for (const env of synced.envelopes) {
-          const from = String(env.sender_did ?? env.senderDid ?? 'did:sonaraim:peer');
-          const preview = String(env.preview ?? env.ciphertext_b64 ?? env.envelope_id ?? 'Queued MLS envelope');
-          personalMessages.push({ from, preview });
+          const payload = env.decodedPayload;
+          if (payload && (payload.tenantDid || payload.title)) {
+            serviceCards.push({
+              tenantDid: String(payload.tenantDid || defaultMerchantDid),
+              title: String(payload.title || 'Verified Service Card'),
+              actions: Array.isArray(payload.actions) ? payload.actions : ['View'],
+              clipToken: payload.clipToken,
+            });
+          } else {
+            const from = String(
+              payload?.senderDid ?? env.sender_did ?? env.senderDid ?? 'did:sonaraim:peer'
+            );
+            const preview = String(
+              payload?.text ?? env.preview ?? env.ciphertext_b64 ?? env.envelope_id ?? 'Queued MLS envelope'
+            );
+            personalMessages.push({ from, preview });
+          }
         }
       }
+
+      if (serviceCards.length === 0) {
+        serviceCards.push({
+          tenantDid: defaultMerchantDid,
+          title: 'Appointment Confirmation',
+          actions: ['Confirm'],
+        });
+      }
+
       const html = renderInboxView({
         personalMessages,
-        serviceCards: [
-          {
-            tenantDid: defaultMerchantDid,
-            title: 'Appointment Confirmation',
-            actions: ['Confirm'],
-          },
-        ],
+        serviceCards,
       });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
       return;
     }
 
-    if (req.method === 'POST' && url.pathname === '/inbox/consent/revoke') {
-      counters.consentRevocationsTotal += 1;
-      const body = await readRequestBody(req);
-      const tenantDid = String(body.tenantDid || defaultMerchantDid).trim();
-      const revokedAtMs = Date.now();
-      router.revokeConsent(tenantDid, revokedAtMs);
-      const revokedAt = new Date(revokedAtMs).toISOString();
-
-      if (prefersJson(req)) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'revoked', tenantDid, revokedAt }));
-        return;
-      }
-
-      const html = renderInboxView({
-        personalMessages: [{ from: 'did:sonaraim:bob', preview: 'Encrypted MLS hello' }],
-        serviceCards: [],
-        revocationReceipt: { tenantDid, revokedAt },
-      });
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
-      return;
-    }
-
-    const clipActMatch = url.pathname.match(/^\/c\/([^/]+)\/act$/);
-    if (req.method === 'POST' && clipActMatch) {
-      counters.clipActionsTotal += 1;
-      const token = decodeURIComponent(clipActMatch[1]).trim();
-      const body = await readRequestBody(req);
-      const action = String(body.action || 'Confirm Action').trim();
-      const tenantDid = String(body.tenantDid || defaultMerchantDid).trim();
-      const signed = createSignedCardAction(
-        {
-          cardId: `clip_${token}`,
-          actionId: action,
-          userDid: 'did:sonaraim:ephemeral-clip-user',
-          merchantDid: tenantDid,
-          parameters: { token },
-        },
-        sessionPrivateKey
-      );
-      const receiptId = `rcpt_${crypto.randomUUID().slice(0, 8)}`;
-
-      if (prefersJson(req)) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            status: 'confirmed',
-            token,
-            tenantDid,
-            action,
-            receiptId,
-            signature: signed.signature,
-          })
-        );
-        return;
-      }
-
-      const html = renderInstantClipView({
-        token,
-        tenantDid,
-        title: 'Instant Clip Card',
-        actions: ['Confirm Action'],
-        confirmationReceipt: { action, receiptId, signature: signed.signature },
-      });
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(html);
-      return;
-    }
-
-    if (req.method === 'GET' && url.pathname.startsWith('/c/')) {
-      const token = url.pathname.slice(3);
-      try {
-        const html = renderInstantClipView({
-          token,
-          tenantDid: defaultMerchantDid,
-          title: 'Instant Clip Card',
-          actions: ['Confirm Action'],
-        });
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(html);
-      } catch (err) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
-      }
+    if (
+      await handleClipAndConsentRoutes(req, res, url, {
+        router,
+        sessionPrivateKey,
+        defaultMerchantDid,
+        counters,
+      })
+    ) {
       return;
     }
 
@@ -247,7 +192,13 @@ export function createAppRequestHandler(config) {
 /**
  * Starts the Client App HTTP server on `127.0.0.1`.
  *
- * @param {{nodeApiBaseUrl: string, appHttpPort: number, requireAuth?: boolean, sessionSecret?: string}} config
+ * @param {{
+ *   nodeApiBaseUrl: string,
+ *   appHttpPort: number,
+ *   requireAuth?: boolean,
+ *   sessionSecret?: string,
+ *   livekitUrl?: string
+ * }} config
  * @returns {Promise<{baseUrl: string, close: () => Promise<void>}>}
  */
 export function startAppTestServer(config) {
