@@ -8,6 +8,7 @@ import { renderInboxView } from './ui/inboxView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
 import { fetchMailboxEnvelopes } from './nodeClient.mjs';
 import { verifyAppSessionCookie } from './passkeySession.mjs';
+import { handlePhoneAndDeviceRoutes } from './phonePairing.mjs';
 import { handleClipAndConsentRoutes } from './clipRoutes.mjs';
 import {
   handlePasskeyAuthRoutes,
@@ -36,6 +37,7 @@ export function createAppRequestHandler(config) {
   const requireAuth =
     config.requireAuth === true || process.env.SONARAIM_REQUIRE_AUTH === 'true';
   const challengeStore = new Map();
+  const pairingStore = new Map();
 
   const router = new DualInboxRouter();
   const defaultMerchantDid = 'did:web:clinic.example.com';
@@ -108,6 +110,15 @@ export function createAppRequestHandler(config) {
       return;
     }
 
+    if (
+      await handlePhoneAndDeviceRoutes(req, res, url, {
+        nodeApiBaseUrl: config.nodeApiBaseUrl,
+        pairingStore,
+      })
+    ) {
+      return;
+    }
+
     const mailboxMatch = url.pathname.match(/^\/api\/mailbox\/([^/]+)$/);
     if (req.method === 'GET' && mailboxMatch) {
       const mailboxId = decodeURIComponent(mailboxMatch[1]).trim();
@@ -130,7 +141,14 @@ export function createAppRequestHandler(config) {
 
       const personalMessages = [{ from: 'did:sonaraim:bob', preview: 'Encrypted MLS hello' }];
       const serviceCards = [];
-      const mailboxId = String(url.searchParams.get('mailboxId') ?? '').trim();
+      const rawMailbox = String(url.searchParams.get('mailboxId') ?? '').trim();
+      const mailboxId = rawMailbox.startsWith('did:sonaraim: ')
+        ? `did:sonaraim:+${rawMailbox.slice('did:sonaraim: '.length).trim()}`
+        : rawMailbox;
+      let linkedPhone = url.searchParams.get('phone');
+      if (mailboxId.startsWith('did:sonaraim:+')) {
+        linkedPhone = mailboxId.slice('did:sonaraim:'.length);
+      }
 
       if (mailboxId) {
         counters.mailboxSyncTotal += 1;
@@ -167,6 +185,7 @@ export function createAppRequestHandler(config) {
       const html = renderInboxView({
         personalMessages,
         serviceCards,
+        linkedPhone,
       });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);

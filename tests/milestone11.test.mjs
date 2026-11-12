@@ -21,6 +21,11 @@ import {
   createLiveKitRoomToken,
   fetchMailboxEnvelopes,
   sendP2pEnvelopeToNode,
+  normalizeE164Phone,
+  registerPhoneIdentityOnNode,
+  createDevicePairingSession,
+  verifyDevicePairingCode,
+  buildPwaManifest,
 } from '../src/index.mjs';
 
 /**
@@ -303,5 +308,118 @@ test('Issue #9: decode live Node items[].payload_hex into Dual Inbox streams and
   } finally {
     await close();
     await new Promise((r) => mockNode.close(() => r()));
+  }
+});
+
+test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, and mobile PWA manifest', async () => {
+  // 1. Phone number normalization
+  assert.equal(normalizeE164Phone('+51999888777'), '+51999888777');
+  assert.equal(normalizeE164Phone('51999888777'), '+51999888777');
+  assert.equal(normalizeE164Phone('+1 (415) 555-2671'), '+14155552671');
+  assert.throws(() => normalizeE164Phone(''), /empty/);
+  assert.throws(() => normalizeE164Phone('1234'), /Invalid E.164/);
+
+  // 2. Direct unit tests for phone registration & pairing sessions
+  const phoneReg = await registerPhoneIdentityOnNode('http://127.0.0.1:8090', '+51 999 888 777');
+  assert.equal(phoneReg.phone, '+51999888777');
+  assert.equal(phoneReg.userDid, 'did:sonaraim:+51999888777');
+  assert.ok(phoneReg.blindedToken);
+
+  const pairingStore = new Map();
+  const session = createDevicePairingSession('did:sonaraim:+51999888777', { pairingStore });
+  assert.match(session.pairingCode, /^\d{6}$/);
+  assert.match(
+    session.pairingUri,
+    /^sonaraim:\/\/pair\?code=\d{6}&did=did%3Asonaraim%3A%2B51999888777$/
+  );
+
+  const verified = verifyDevicePairingCode(session.pairingCode, pairingStore);
+  assert.equal(verified.valid, true);
+  assert.equal(verified.userDid, 'did:sonaraim:+51999888777');
+
+  const replay = verifyDevicePairingCode(session.pairingCode, pairingStore);
+  assert.equal(replay.valid, false);
+
+  // 3. Web App Manifest unit check
+  const manifest = buildPwaManifest();
+  assert.equal(manifest.name, 'Sonaraim Client');
+  assert.equal(manifest.start_url, '/inbox');
+  assert.equal(manifest.display, 'standalone');
+
+  // 4. HTTP integration tests
+  const { baseUrl, close } = await startAppTestServer({
+    nodeApiBaseUrl: 'http://127.0.0.1:8090',
+    appHttpPort: 0,
+  });
+
+  try {
+    // Phone registration route
+    const regRes = await httpRequest(`${baseUrl}/auth/phone/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: '+51999888777' }),
+    });
+    assert.equal(regRes.status, 200);
+    const regData = JSON.parse(regRes.body);
+    assert.equal(regData.status, 'registered');
+    assert.equal(regData.phone, '+51999888777');
+    assert.equal(regData.userDid, 'did:sonaraim:+51999888777');
+
+    const regBad = await httpRequest(`${baseUrl}/auth/phone/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: 'bad-number' }),
+    });
+    assert.equal(regBad.status, 400);
+
+    // Companion device pairing: create code
+    const pairCreate = await httpRequest(`${baseUrl}/auth/devices/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid: 'did:sonaraim:+51999888777' }),
+    });
+    assert.equal(pairCreate.status, 200);
+    const pairData = JSON.parse(pairCreate.body);
+    assert.equal(pairData.status, 'created');
+    assert.match(pairData.pairingCode, /^\d{6}$/);
+
+    // Companion device pairing: redeem code
+    const pairClaim = await httpRequest(`${baseUrl}/auth/devices/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairingCode: pairData.pairingCode }),
+    });
+    assert.equal(pairClaim.status, 200);
+    const claimData = JSON.parse(pairClaim.body);
+    assert.equal(claimData.status, 'paired');
+    assert.equal(claimData.userDid, 'did:sonaraim:+51999888777');
+
+    // Companion device pairing: invalid code
+    const pairBad = await httpRequest(`${baseUrl}/auth/devices/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairingCode: '000000' }),
+    });
+    assert.equal(pairBad.status, 400);
+
+    // GET /manifest.webmanifest
+    const manifestRes = await httpRequest(`${baseUrl}/manifest.webmanifest`);
+    assert.equal(manifestRes.status, 200);
+    assert.match(String(manifestRes.headers['content-type']), /application\/manifest\+json/);
+    const manifestBody = JSON.parse(manifestRes.body);
+    assert.equal(manifestBody.short_name, 'Sonaraim');
+
+    // GET /inbox rendering linked phone and companion device section
+    const inboxRes = await httpRequest(`${baseUrl}/inbox?mailboxId=did:sonaraim:+51999888777`);
+    assert.equal(inboxRes.status, 200);
+    assert.match(inboxRes.body, /<link rel="icon" href="data:," \/>/);
+    assert.match(inboxRes.body, /<link rel="manifest" href="\/manifest\.webmanifest" \/>/);
+    assert.match(inboxRes.body, /Linked Phone:\s*<code>\+51999888777<\/code>/);
+    assert.match(inboxRes.body, /Link Companion Device \(6-digit code\)/);
+    assert.match(inboxRes.body, /@media\s*\(max-width:\s*375px\)/);
+    assert.match(inboxRes.body, /@media\s*\(max-width:\s*768px\)/);
+    assert.match(inboxRes.body, /overflow-x:\s*hidden/);
+  } finally {
+    await close();
   }
 });

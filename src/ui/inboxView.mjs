@@ -1,24 +1,28 @@
 /**
  * @fileoverview Dual Inbox & Declarative Card UI renderer separating Personal (`did:sonaraim`)
- * and Verified Services (`did:web`) streams with interactive P2P messaging.
+ * and Verified Services (`did:web`) streams with companion device pairing and P2P messaging.
  */
 
 import { escapeHtml, renderAppShell } from './htmlUtils.mjs';
 
 /**
  * Renders the Dual Inbox HTML view with strict escaping of message previews, interactive
- * card action forms, 1-tap consent revocation, and P2P message sender form.
+ * card action forms, 1-tap consent revocation, and 6-digit companion device pairing controls.
  *
  * @param {object} [state] - Inbox snapshot.
  * @param {Array<{from: string, preview: string}>} [state.personalMessages]
  * @param {Array<{tenantDid: string, title: string, actions?: string[], clipToken?: string}>} [state.serviceCards]
  * @param {{tenantDid: string, revokedAt: string}} [state.revocationReceipt] - Optional consent revocation receipt.
+ * @param {string} [state.linkedPhone] - Optional registered E.164 phone number.
+ * @param {{ pairingCode: string, pairingUri: string }} [state.pairingSession] - Optional active device pairing session.
  * @returns {string} Complete HTML5 document.
  */
 export function renderInboxView({
   personalMessages = [],
   serviceCards = [],
   revocationReceipt = null,
+  linkedPhone = null,
+  pairingSession = null,
 } = {}) {
   const bannerHtml = revocationReceipt
     ? `<div class="banner" role="status" aria-live="polite">
@@ -69,6 +73,20 @@ export function renderInboxView({
     })
     .join('');
 
+  const phoneSection = linkedPhone
+    ? `<p>Linked Phone: <code>${escapeHtml(linkedPhone)}</code></p>`
+    : '';
+
+  const pairingBoxHtml = pairingSession
+    ? `<div>
+        <p>Active 6-digit Code: <strong><code>${escapeHtml(pairingSession.pairingCode)}</code></strong></p>
+        <p><small>${escapeHtml(pairingSession.pairingUri)}</small></p>
+      </div>`
+    : `<form method="POST" action="/auth/devices/pair">
+        <input type="hidden" name="userDid" value="${escapeHtml(linkedPhone ? `did:sonaraim:${linkedPhone}` : 'did:sonaraim:user')}" />
+        <button type="submit">Generate 6-Digit Code</button>
+      </form>`;
+
   const contentHtml = `
     <section aria-labelledby="personal-stream">
       <h2 id="personal-stream">Personal Stream</h2>
@@ -79,6 +97,13 @@ export function renderInboxView({
       <h2 id="services-stream">Verified Services</h2>
       ${bannerHtml}
       ${serviceRows}
+    </section>
+    <section aria-labelledby="devices-stream">
+      <h2 id="devices-stream">Companion Devices</h2>
+      <h3>Link Companion Device (6-digit code)</h3>
+      <p>Scan QR or enter 6-digit code to pair desktop and browser clients to your phone identity.</p>
+      ${phoneSection}
+      ${pairingBoxHtml}
     </section>`;
 
   return renderAppShell({
