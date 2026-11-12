@@ -32,6 +32,7 @@ export function renderAppShell({ title, contentHtml }) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="data:," />
   <title>${safeTitle}</title>
   <style>
     :root { --bg:#090d16; --card:#121826; --text:#f3f4f6; --accent:#22d3ee; }
