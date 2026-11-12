@@ -9,74 +9,34 @@ import { renderInstantClipView } from './ui/instantClipView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
 import { createSignedCardAction } from './cardRenderer.mjs';
 import { fetchMailboxEnvelopes } from './nodeClient.mjs';
-
-/**
- * Reads and parses the incoming HTTP request body (supports JSON and application/x-www-form-urlencoded).
- *
- * @param {http.IncomingMessage} req - Incoming HTTP request.
- * @returns {Promise<Record<string, string>>} Parsed key-value payload.
- */
-function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    let raw = '';
-    req.on('data', (chunk) => {
-      raw += chunk;
-      if (raw.length > 65536) {
-        reject(new Error('Request body too large'));
-      }
-    });
-    req.on('end', () => {
-      const trimmed = raw.trim();
-      if (!trimmed) {
-        resolve({});
-        return;
-      }
-      const contentType = String(req.headers['content-type'] ?? '').toLowerCase();
-      if (contentType.includes('application/json') || trimmed.startsWith('{')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          resolve(parsed && typeof parsed === 'object' ? parsed : {});
-          return;
-        } catch {
-          resolve({});
-          return;
-        }
-      }
-      const params = new URLSearchParams(trimmed);
-      /** @type {Record<string, string>} */
-      const out = {};
-      for (const [k, v] of params.entries()) {
-        out[k] = v;
-      }
-      resolve(out);
-    });
-    req.on('error', reject);
-  });
-}
-
-/**
- * Determines whether the caller explicitly prefers a JSON response over HTML.
- *
- * @param {http.IncomingMessage} req - Incoming HTTP request.
- * @returns {boolean} True when JSON response is requested.
- */
-function prefersJson(req) {
-  const accept = String(req.headers.accept ?? '').toLowerCase();
-  const contentType = String(req.headers['content-type'] ?? '').toLowerCase();
-  if (accept.includes('application/json') && !accept.includes('text/html')) {
-    return true;
-  }
-  return contentType.includes('application/json') && !accept.includes('text/html');
-}
+import { verifyAppSessionCookie } from './passkeySession.mjs';
+import {
+  readRequestBody,
+  prefersJson,
+  handlePasskeyAuthRoutes,
+} from './apiRoutes.mjs';
 
 /**
  * Creates the HTTP request handler wired to the client app configuration.
  *
- * @param {{nodeApiBaseUrl: string, appHttpPort: number, b2bApiBaseUrl?: string}} config
+ * @param {{
+ *   nodeApiBaseUrl: string,
+ *   appHttpPort: number,
+ *   b2bApiBaseUrl?: string,
+ *   requireAuth?: boolean,
+ *   sessionSecret?: string
+ * }} config
  * @returns {http.RequestListener}
  */
 export function createAppRequestHandler(config) {
   const { privateKey: sessionPrivateKey } = crypto.generateKeyPairSync('ed25519');
+  const sessionSecret =
+    String(config.sessionSecret || process.env.SONARAIM_SESSION_SECRET || '').trim() ||
+    crypto.randomBytes(32).toString('hex');
+  const requireAuth =
+    config.requireAuth === true || process.env.SONARAIM_REQUIRE_AUTH === 'true';
+  const challengeStore = new Map();
+
   const router = new DualInboxRouter();
   const defaultMerchantDid = 'did:web:clinic.example.com';
   router.grantConsent({
@@ -130,6 +90,10 @@ export function createAppRequestHandler(config) {
       return;
     }
 
+    if (await handlePasskeyAuthRoutes(req, res, url, { challengeStore, sessionSecret })) {
+      return;
+    }
+
     const mailboxMatch = url.pathname.match(/^\/api\/mailbox\/([^/]+)$/);
     if (req.method === 'GET' && mailboxMatch) {
       const mailboxId = decodeURIComponent(mailboxMatch[1]).trim();
@@ -140,7 +104,16 @@ export function createAppRequestHandler(config) {
       return;
     }
 
-    if (req.method === 'GET' && url.pathname === '/inbox') {
+    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/inbox')) {
+      if (requireAuth) {
+        const check = verifyAppSessionCookie(req.headers.cookie, sessionSecret);
+        if (!check.valid) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unauthorized', reason: check.reason }));
+          return;
+        }
+      }
+
       const personalMessages = [{ from: 'did:sonaraim:bob', preview: 'Encrypted MLS hello' }];
       const mailboxId = String(url.searchParams.get('mailboxId') ?? '').trim();
       if (mailboxId) {
@@ -263,7 +236,7 @@ export function createAppRequestHandler(config) {
 /**
  * Starts the Client App HTTP server on `127.0.0.1`.
  *
- * @param {{nodeApiBaseUrl: string, appHttpPort: number}} config
+ * @param {{nodeApiBaseUrl: string, appHttpPort: number, requireAuth?: boolean, sessionSecret?: string}} config
  * @returns {Promise<{baseUrl: string, close: () => Promise<void>}>}
  */
 export function startAppTestServer(config) {
