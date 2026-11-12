@@ -29,6 +29,6 @@ USER sonaraim
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD node -e "import('./src/index.mjs').then(() => process.exit(0)).catch(() => process.exit(1))"
+  CMD node -e "const p=process.env.SONARAIM_APP_PORT||process.env.APP_WEB_PORT; fetch('http://127.0.0.1:'+p+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "src/index.mjs"]
+CMD ["node", "src/main.mjs"]
