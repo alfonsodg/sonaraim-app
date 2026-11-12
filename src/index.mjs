@@ -23,3 +23,14 @@ export {
   encryptVaultBlob,
   decryptVaultBlob
 } from './zkVault.mjs';
+
+export { renderInboxView } from './ui/inboxView.mjs';
+export { renderInstantClipView } from './ui/instantClipView.mjs';
+export {
+  blindContactIdentifier,
+  intersectDiscoveredContacts
+} from './contactDiscovery.mjs';
+export {
+  createAppRequestHandler,
+  startAppTestServer
+} from './server.mjs';
