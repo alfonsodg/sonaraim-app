@@ -1,0 +1,20 @@
+{
+  "name": "@sonaraim/app",
+  "version": "0.1.0",
+  "description": "SonarAIM Client Core — Dual Inbox router, Zero-HTML Card renderer model, and Passkey Zero-Knowledge Vault",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./dualInbox": "./src/dualInbox.mjs",
+    "./cardRenderer": "./src/cardRenderer.mjs",
+    "./zkVault": "./src/zkVault.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "Apache-2.0"
+}
