@@ -11,6 +11,7 @@ import {
   renderInboxView,
   renderInstantClipView,
   startAppTestServer,
+  fetchMailboxEnvelopes,
 } from '../src/index.mjs';
 
 /**
@@ -118,7 +119,6 @@ test('Issue #5: POST /c/:token/act and POST /inbox/consent/revoke return 200 OK 
   });
 
   try {
-    // 1. Form-encoded submission (browser form submit) to POST /c/:token/act
     const formAct = await httpRequest(`${baseUrl}/c/clip_token_77/act`, {
       method: 'POST',
       headers: {
@@ -132,7 +132,6 @@ test('Issue #5: POST /c/:token/act and POST /inbox/consent/revoke return 200 OK 
     assert.match(formAct.body, /clip_token_77/);
     assert.match(formAct.body, /Signature:/i);
 
-    // 2. JSON submission to POST /c/:token/act
     const jsonAct = await httpRequest(`${baseUrl}/c/clip_token_77/act`, {
       method: 'POST',
       headers: {
@@ -152,7 +151,6 @@ test('Issue #5: POST /c/:token/act and POST /inbox/consent/revoke return 200 OK 
     assert.ok(parsedAct.signature);
     assert.ok(parsedAct.receiptId);
 
-    // 3. Form-encoded submission to POST /inbox/consent/revoke
     const formRevoke = await httpRequest(`${baseUrl}/inbox/consent/revoke`, {
       method: 'POST',
       headers: {
@@ -165,7 +163,6 @@ test('Issue #5: POST /c/:token/act and POST /inbox/consent/revoke return 200 OK 
     assert.match(formRevoke.body, /Consent revoked for/i);
     assert.match(formRevoke.body, /did:web:clinic\.example\.com/);
 
-    // 4. JSON submission to POST /inbox/consent/revoke
     const jsonRevoke = await httpRequest(`${baseUrl}/inbox/consent/revoke`, {
       method: 'POST',
       headers: {
@@ -181,5 +178,76 @@ test('Issue #5: POST /c/:token/act and POST /inbox/consent/revoke return 200 OK 
     assert.ok(parsedRevoke.revokedAt);
   } finally {
     await close();
+  }
+});
+
+test('Issue #6: fetchMailboxEnvelopes drains queued envelopes from Node API and /api/mailbox/:mailboxId + /metrics work', async () => {
+  // Start a mock sonaraim-node server
+  const mockEnvelopes = [
+    {
+      envelope_id: 'env-live-01',
+      sender_did: 'did:sonaraim:carol',
+      ciphertext_b64: 'SGVsbG8gZnJvbSBDYXJvbA==',
+    },
+  ];
+
+  const mockNodeServer = http.createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+    if (req.method === 'GET' && url.pathname === '/v1/relay/mailboxes/mbx_alice') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          mailbox_id: 'mbx_alice',
+          envelopes: mockEnvelopes,
+        })
+      );
+      return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'not_found' }));
+  });
+
+  await new Promise((resolve) => mockNodeServer.listen(0, '127.0.0.1', resolve));
+  const nodeAddr = mockNodeServer.address();
+  const mockNodeUrl = `http://127.0.0.1:${nodeAddr.port}`;
+
+  const { baseUrl, close } = await startAppTestServer({
+    nodeApiBaseUrl: mockNodeUrl,
+    appHttpPort: 0,
+  });
+
+  try {
+    const direct = await fetchMailboxEnvelopes(mockNodeUrl, 'mbx_alice');
+    assert.equal(direct.mailboxId, 'mbx_alice');
+    assert.equal(direct.envelopes.length, 1);
+    assert.equal(direct.envelopes[0].envelope_id, 'env-live-01');
+
+    // Graceful fallback when unreachable
+    const fallback = await fetchMailboxEnvelopes('http://127.0.0.1:1', 'mbx_alice', 150);
+    assert.equal(fallback.mailboxId, 'mbx_alice');
+    assert.deepEqual(fallback.envelopes, []);
+
+    // Proxy route GET /api/mailbox/:mailboxId
+    const proxyRes = await httpRequest(`${baseUrl}/api/mailbox/mbx_alice`);
+    assert.equal(proxyRes.status, 200);
+    const proxyData = JSON.parse(proxyRes.body);
+    assert.equal(proxyData.mailboxId, 'mbx_alice');
+    assert.equal(proxyData.envelopes.length, 1);
+    assert.equal(proxyData.envelopes[0].envelope_id, 'env-live-01');
+
+    // GET /inbox?mailboxId=mbx_alice renders live synced message
+    const liveInbox = await httpRequest(`${baseUrl}/inbox?mailboxId=mbx_alice`);
+    assert.equal(liveInbox.status, 200);
+    assert.match(liveInbox.body, /did:sonaraim:carol/);
+
+    // GET /metrics returns Prometheus text/plain; version=0.0.4
+    const metricsRes = await httpRequest(`${baseUrl}/metrics`);
+    assert.equal(metricsRes.status, 200);
+    assert.match(String(metricsRes.headers['content-type']), /text\/plain;\s*version=0\.0\.4/);
+    assert.match(metricsRes.body, /sonaraim_app_http_requests_total/);
+    assert.match(metricsRes.body, /sonaraim_app_mailbox_sync_total/);
+  } finally {
+    await close();
+    await new Promise((resolve) => mockNodeServer.close(() => resolve()));
   }
 });

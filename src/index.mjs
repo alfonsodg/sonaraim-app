@@ -1,7 +1,7 @@
 /**
  * @fileoverview SonarAIM Client Core SDK entry point.
  * Re-exports the Dual Inbox router, Zero-HTML Declarative Card renderer,
- * and Passkey WebAuthn PRF Zero-Knowledge Vault modules.
+ * Passkey WebAuthn PRF Zero-Knowledge Vault, and Node relay client modules.
  */
 
 export {
@@ -30,6 +30,7 @@ export {
   blindContactIdentifier,
   intersectDiscoveredContacts
 } from './contactDiscovery.mjs';
+export { fetchMailboxEnvelopes } from './nodeClient.mjs';
 export {
   createAppRequestHandler,
   startAppTestServer

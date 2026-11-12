@@ -8,6 +8,7 @@ import { renderInboxView } from './ui/inboxView.mjs';
 import { renderInstantClipView } from './ui/instantClipView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
 import { createSignedCardAction } from './cardRenderer.mjs';
+import { fetchMailboxEnvelopes } from './nodeClient.mjs';
 
 /**
  * Reads and parses the incoming HTTP request body (supports JSON and application/x-www-form-urlencoded).
@@ -85,8 +86,17 @@ export function createAppRequestHandler(config) {
     expiresAt: Date.now() + 86_400_000 * 30,
   });
 
+  const counters = {
+    httpRequestsTotal: 0,
+    mailboxSyncTotal: 0,
+    clipActionsTotal: 0,
+    consentRevocationsTotal: 0,
+  };
+
   return async (req, res) => {
+    counters.httpRequestsTotal += 1;
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
@@ -99,9 +109,51 @@ export function createAppRequestHandler(config) {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/metrics') {
+      const lines = [
+        '# HELP sonaraim_app_http_requests_total Total HTTP requests handled by sonaraim-app.',
+        '# TYPE sonaraim_app_http_requests_total counter',
+        `sonaraim_app_http_requests_total ${counters.httpRequestsTotal}`,
+        '# HELP sonaraim_app_mailbox_sync_total Total Node mailbox sync operations executed.',
+        '# TYPE sonaraim_app_mailbox_sync_total counter',
+        `sonaraim_app_mailbox_sync_total ${counters.mailboxSyncTotal}`,
+        '# HELP sonaraim_app_clip_actions_total Total Instant Clip interactive actions signed.',
+        '# TYPE sonaraim_app_clip_actions_total counter',
+        `sonaraim_app_clip_actions_total ${counters.clipActionsTotal}`,
+        '# HELP sonaraim_app_consent_revocations_total Total 1-tap consent revocations processed.',
+        '# TYPE sonaraim_app_consent_revocations_total counter',
+        `sonaraim_app_consent_revocations_total ${counters.consentRevocationsTotal}`,
+        '',
+      ].join('\n');
+      res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4; charset=utf-8' });
+      res.end(lines);
+      return;
+    }
+
+    const mailboxMatch = url.pathname.match(/^\/api\/mailbox\/([^/]+)$/);
+    if (req.method === 'GET' && mailboxMatch) {
+      const mailboxId = decodeURIComponent(mailboxMatch[1]).trim();
+      counters.mailboxSyncTotal += 1;
+      const synced = await fetchMailboxEnvelopes(config.nodeApiBaseUrl, mailboxId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(synced));
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/inbox') {
+      const personalMessages = [{ from: 'did:sonaraim:bob', preview: 'Encrypted MLS hello' }];
+      const mailboxId = String(url.searchParams.get('mailboxId') ?? '').trim();
+      if (mailboxId) {
+        counters.mailboxSyncTotal += 1;
+        const synced = await fetchMailboxEnvelopes(config.nodeApiBaseUrl, mailboxId, 1500);
+        for (const env of synced.envelopes) {
+          const from = String(env.sender_did ?? env.senderDid ?? 'did:sonaraim:peer');
+          const preview = String(env.preview ?? env.ciphertext_b64 ?? env.envelope_id ?? 'Queued MLS envelope');
+          personalMessages.push({ from, preview });
+        }
+      }
       const html = renderInboxView({
-        personalMessages: [{ from: 'did:sonaraim:bob', preview: 'Encrypted MLS hello' }],
+        personalMessages,
         serviceCards: [
           {
             tenantDid: defaultMerchantDid,
@@ -116,6 +168,7 @@ export function createAppRequestHandler(config) {
     }
 
     if (req.method === 'POST' && url.pathname === '/inbox/consent/revoke') {
+      counters.consentRevocationsTotal += 1;
       const body = await readRequestBody(req);
       const tenantDid = String(body.tenantDid || defaultMerchantDid).trim();
       const revokedAtMs = Date.now();
@@ -124,13 +177,7 @@ export function createAppRequestHandler(config) {
 
       if (prefersJson(req)) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-          JSON.stringify({
-            status: 'revoked',
-            tenantDid,
-            revokedAt,
-          })
-        );
+        res.end(JSON.stringify({ status: 'revoked', tenantDid, revokedAt }));
         return;
       }
 
@@ -146,6 +193,7 @@ export function createAppRequestHandler(config) {
 
     const clipActMatch = url.pathname.match(/^\/c\/([^/]+)\/act$/);
     if (req.method === 'POST' && clipActMatch) {
+      counters.clipActionsTotal += 1;
       const token = decodeURIComponent(clipActMatch[1]).trim();
       const body = await readRequestBody(req);
       const action = String(body.action || 'Confirm Action').trim();
@@ -182,11 +230,7 @@ export function createAppRequestHandler(config) {
         tenantDid,
         title: 'Instant Clip Card',
         actions: ['Confirm Action'],
-        confirmationReceipt: {
-          action,
-          receiptId,
-          signature: signed.signature,
-        },
+        confirmationReceipt: { action, receiptId, signature: signed.signature },
       });
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
