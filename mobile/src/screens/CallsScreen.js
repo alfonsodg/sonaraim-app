@@ -1,6 +1,7 @@
 /**
  * @fileoverview LiveKit Encrypted Calling Screen for Sonaraim Mobile.
- * Fetches cryptographic call room tokens from `/api/calls/token` and launches E2E call sessions.
+ * Fetches cryptographic call room tokens, provides embedded WebRTC in-app controls,
+ * and launches external LiveKit Meet sessions.
  */
 
 import React, { useState } from 'react';
@@ -10,11 +11,16 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  StyleSheet,
   ActivityIndicator,
   Linking,
 } from 'react-native';
 import { apiClient, buildLiveKitJoinUrl } from '../apiClient.js';
+import {
+  CallControls,
+  initialCallControlsState,
+  resolveCallControlAction,
+} from '../components/CallControls.js';
+import { callsStyles as styles } from '../styles/callsStyles.js';
 
 /**
  * Screen component for creating and joining encrypted LiveKit voice/video call rooms.
@@ -33,6 +39,7 @@ export function CallsScreen({
   const [participantDid, setParticipantDid] = useState(currentUserDid);
   const [callSession, setCallSession] = useState(null);
   const [callState, setCallState] = useState('idle'); // idle | connecting | connected | ended
+  const [controlsState, setControlsState] = useState(initialCallControlsState());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -83,11 +90,21 @@ export function CallsScreen({
   }
 
   /**
+   * Handles in-app WebRTC control toggling.
+   *
+   * @param {'toggle_mute' | 'toggle_camera' | 'switch_camera' | 'toggle_speaker'} action
+   */
+  function handleControlAction(action) {
+    setControlsState((prev) => resolveCallControlAction(prev, action));
+  }
+
+  /**
    * Terminates the active call session.
    */
   function handleEndCall() {
     setCallState('ended');
     setCallSession(null);
+    setControlsState(initialCallControlsState());
   }
 
   return (
@@ -161,12 +178,19 @@ export function CallsScreen({
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenVideoRoom}>
-            <Text style={styles.buttonText}>Open Video Room (LiveKit Meet)</Text>
-          </TouchableOpacity>
+          {/* Embedded WebRTC In-App Room Controls */}
+          <CallControls
+            controlsState={controlsState}
+            onAction={handleControlAction}
+            onEndCall={handleEndCall}
+          />
 
-          <TouchableOpacity style={[styles.endCallButton, { marginTop: 10 }]} onPress={handleEndCall}>
-            <Text style={styles.endCallButtonText}>End Call Session</Text>
+          {/* Fallback to external Meet room */}
+          <TouchableOpacity
+            style={[styles.primaryButton, { marginTop: 12 }]}
+            onPress={handleOpenVideoRoom}
+          >
+            <Text style={styles.buttonText}>Open Video Room (LiveKit Meet)</Text>
           </TouchableOpacity>
         </View>
       ) : null}
@@ -179,91 +203,3 @@ export function CallsScreen({
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#090d16' },
-  content: { padding: 16, paddingBottom: 40 },
-  headerTitle: { fontSize: 22, fontWeight: '700', color: '#f8fafc', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: '#94a3b8', marginBottom: 16 },
-  card: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-  },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: '#38bdf8', marginBottom: 12 },
-  label: { fontSize: 13, color: '#94a3b8', marginBottom: 6 },
-  input: {
-    backgroundColor: '#1e293b',
-    color: '#f8fafc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  primaryButton: {
-    backgroundColor: '#059669',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  buttonText: { color: '#ffffff', fontWeight: '600', fontSize: 14 },
-  buttonDisabled: { opacity: 0.6 },
-  activeCallCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    borderWidth: 2,
-    borderColor: '#059669',
-  },
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-  liveDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#10b981',
-    marginRight: 8,
-  },
-  statusText: { color: '#10b981', fontWeight: '700', fontSize: 13, letterSpacing: 1 },
-  sessionDetails: { marginBottom: 16 },
-  detailLabel: { color: '#94a3b8', fontSize: 12, marginTop: 6 },
-  detailValue: { color: '#f8fafc', fontSize: 14, fontWeight: '600' },
-  tokenBox: {
-    color: '#38bdf8',
-    backgroundColor: '#1e293b',
-    padding: 8,
-    borderRadius: 6,
-    fontSize: 12,
-    fontFamily: 'monospace',
-    marginTop: 4,
-  },
-  endCallButton: {
-    backgroundColor: '#dc2626',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  endCallButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 14 },
-  endedBox: {
-    padding: 12,
-    backgroundColor: '#1e293b',
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  endedText: { color: '#94a3b8', fontSize: 13 },
-  errorBanner: {
-    backgroundColor: '#7f1d1d',
-    color: '#fecaca',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 12,
-    fontSize: 13,
-  },
-});

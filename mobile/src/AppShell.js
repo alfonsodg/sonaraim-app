@@ -1,6 +1,6 @@
 /**
  * @fileoverview Main Application Shell for Sonaraim React Native Mobile.
- * Wires bottom navigation tabs (`Inbox`, `Activation & Pairing`, `Calls`) and identity state.
+ * Wires bottom navigation tabs (`Inbox`, `Groups`, `Status`, `Calls`, `Pairing`) and identity state.
  */
 
 import React, { useState } from 'react';
@@ -12,23 +12,30 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { InboxScreen } from './screens/InboxScreen.js';
-import { ActivationScreen } from './screens/ActivationScreen.js';
+import { GroupsScreen } from './screens/GroupsScreen.js';
+import { StatusScreen } from './screens/StatusScreen.js';
 import { CallsScreen } from './screens/CallsScreen.js';
+import { ActivationScreen } from './screens/ActivationScreen.js';
 
 /**
  * Available navigation tabs.
- * @type {ReadonlyArray<{ id: 'inbox' | 'activation' | 'calls', label: string }>}
+ * @type {ReadonlyArray<{ id: 'inbox' | 'groups' | 'status' | 'calls' | 'activation', label: string }>}
  */
 export const TABS = Object.freeze([
   { id: 'inbox', label: 'Inbox' },
-  { id: 'activation', label: 'Activation & Pairing' },
+  { id: 'groups', label: 'Groups' },
+  { id: 'status', label: 'Status' },
   { id: 'calls', label: 'Calls' },
+  { id: 'activation', label: 'Pairing' },
 ]);
 
 /**
  * Root mobile application shell rendering top header, screen content, and bottom tab navigation.
  *
- * @param {{ initialTab?: 'inbox' | 'activation' | 'calls', initialDid?: string }} [props]
+ * @param {{
+ *   initialTab?: 'inbox' | 'groups' | 'status' | 'calls' | 'activation',
+ *   initialDid?: string
+ * }} [props]
  * @returns {React.ReactElement} AppShell component.
  */
 export function AppShell({
@@ -69,12 +76,14 @@ export function AppShell({
       <View style={styles.screenContainer}>
         {activeTab === 'inbox' ? (
           <InboxScreen currentUserDid={userDid} />
-        ) : activeTab === 'activation' ? (
-          <ActivationScreen
-            onIdentityActivated={handleIdentityActivated}
-          />
-        ) : (
+        ) : activeTab === 'groups' ? (
+          <GroupsScreen currentUserDid={userDid} />
+        ) : activeTab === 'status' ? (
+          <StatusScreen currentUserDid={userDid} />
+        ) : activeTab === 'calls' ? (
           <CallsScreen currentUserDid={userDid} />
+        ) : (
+          <ActivationScreen onIdentityActivated={handleIdentityActivated} />
         )}
       </View>
 
@@ -152,11 +161,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#1e293b',
     paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
     borderRadius: 8,
   },
@@ -165,7 +174,7 @@ const styles = StyleSheet.create({
   },
   tabButtonText: {
     color: '#94a3b8',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   tabButtonTextActive: {

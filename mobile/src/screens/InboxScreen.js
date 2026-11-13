@@ -1,21 +1,17 @@
 /**
  * @fileoverview Dual Inbox Screen for Sonaraim Mobile.
- * Segregates incoming traffic into Personal P2P and Verified Services streams,
- * rendering Zero-HTML Declarative Cards with interactive action triggers.
+ * Integrates Personal P2P and Verified Services streams, Declarative Cards,
+ * E2EE Media Composer, Quote Replies, Emoji Reactions, and Read Receipts.
  */
 
 import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
-  ActivityIndicator,
-} from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import { apiClient } from '../apiClient.js';
 import { validateDeclarativeCard } from '../cardValidator.js';
+import { MediaComposer } from '../components/MediaComposer.js';
+import { PersonalMessageItem } from '../components/PersonalMessageItem.js';
+import { toggleReaction, buildQuoteReply, sendRelaySignal } from '../chatFeatures.js';
+import { inboxStyles as styles } from '../styles/inboxStyles.js';
 
 /**
  * Screen component providing Dual Inbox streams and secure message composition.
@@ -42,6 +38,8 @@ export function InboxScreen({
             sender: 'did:sonaraim:+14155550199',
             text: 'Hello from Sonaraim encrypted network!',
             timestamp: 'Just now',
+            receiptStatus: 'read',
+            reactions: { '👍': ['did:sonaraim:+14155550199'] },
           },
         ]
   );
@@ -63,7 +61,8 @@ export function InboxScreen({
   );
 
   const [recipientDid, setRecipientDid] = useState('');
-  const [composerText, setComposerText] = useState('');
+  const [quotingMessage, setQuotingMessage] = useState(null);
+  const [isTyping, setIsTyping] = useState(false);
   const [loading, setLoading] = useState(false);
   const [actionFeedback, setActionFeedback] = useState('');
   const [error, setError] = useState('');
@@ -77,11 +76,8 @@ export function InboxScreen({
     setActionFeedback('');
     try {
       const data = await apiClient.fetchInboxMailbox(currentUserDid);
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        setActionFeedback(`Retrieved ${data.items.length} live item(s)`);
-      } else {
-        setActionFeedback('Mailbox is up to date (0 new items)');
-      }
+      const count = Array.isArray(data.items) ? data.items.length : 0;
+      setActionFeedback(count > 0 ? `Retrieved ${count} live item(s)` : 'Mailbox is up to date (0 new items)');
     } catch (err) {
       setError(err.message || 'Failed to refresh mailbox');
     } finally {
@@ -90,34 +86,81 @@ export function InboxScreen({
   }
 
   /**
-   * Sends an encrypted P2P message.
+   * Handles dispatching a message payload from the MediaComposer.
+   *
+   * @param {{ text: string, mediaPointer?: any }} payload
    */
-  async function handleSendMessage() {
-    if (!recipientDid.trim() || !composerText.trim()) {
-      setError('Recipient DID and message text are required');
+  async function handleSendMessage({ text, mediaPointer }) {
+    if (!recipientDid.trim()) {
+      setError('Recipient DID is required before sending');
       return;
     }
-    setLoading(true);
     setError('');
     try {
+      let newMsg;
+      if (quotingMessage) {
+        newMsg = buildQuoteReply({
+          targetMessage: quotingMessage,
+          senderDid: currentUserDid,
+          replyText: text,
+          mediaPointer,
+        });
+        setQuotingMessage(null);
+      } else {
+        newMsg = {
+          id: `m-${Date.now()}`,
+          sender: currentUserDid,
+          text,
+          mediaPointer,
+          timestamp: 'Just now',
+          receiptStatus: 'sent',
+          reactions: {},
+        };
+      }
+
       await apiClient.sendP2pMessage({
         senderDid: currentUserDid,
         recipientDid: recipientDid.trim(),
-        text: composerText.trim(),
+        text,
       });
-      const newMsg = {
-        id: `m-${Date.now()}`,
-        sender: currentUserDid,
-        text: composerText.trim(),
-        timestamp: 'Just now',
-      };
+
       setPersonalMessages((prev) => [newMsg, ...prev]);
-      setComposerText('');
       setActionFeedback(`Message dispatched to ${recipientDid.trim()}`);
     } catch (err) {
       setError(err.message || 'Failed to send message');
-    } finally {
-      setLoading(false);
+    }
+  }
+
+  /**
+   * Toggles an emoji reaction on a message.
+   *
+   * @param {string} messageId - ID of target message.
+   * @param {string} emoji - Selected emoji.
+   */
+  function handleToggleReaction(messageId, emoji) {
+    setPersonalMessages((prev) =>
+      prev.map((msg) => (msg.id === messageId ? toggleReaction(msg, currentUserDid, emoji) : msg))
+    );
+  }
+
+  /**
+   * Triggers typing notification signal.
+   *
+   * @param {boolean} typingState - Whether the user is currently typing.
+   */
+  async function handleTypingSignal(typingState) {
+    setIsTyping(typingState);
+    if (!recipientDid.trim()) return;
+    try {
+      await sendRelaySignal({
+        nodeApiUrl: apiClient.config.nodeApiUrl,
+        senderDid: currentUserDid,
+        recipientDid: recipientDid.trim(),
+        signalType: 'typing',
+        payload: { is_typing: typingState },
+      });
+    } catch {
+      // Ephemeral typing signals fail silently
     }
   }
 
@@ -146,7 +189,6 @@ export function InboxScreen({
         </TouchableOpacity>
       </View>
 
-      {/* Stream Tabs */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tab, activeStream === 'personal' && styles.tabActive]}
@@ -161,7 +203,7 @@ export function InboxScreen({
           onPress={() => setActiveStream('services')}
         >
           <Text style={[styles.tabText, activeStream === 'services' && styles.tabTextActive]}>
-            Verified Services ({serviceCards.length})
+            Services ({serviceCards.length})
           </Text>
         </TouchableOpacity>
       </View>
@@ -169,12 +211,10 @@ export function InboxScreen({
       {error ? <Text style={styles.errorBanner}>{error}</Text> : null}
       {actionFeedback ? <Text style={styles.feedbackBanner}>{actionFeedback}</Text> : null}
 
-      {/* Stream Content */}
       {activeStream === 'personal' ? (
         <View>
-          {/* P2P Composer */}
           <View style={styles.composerCard}>
-            <Text style={styles.cardHeader}>Compose Encrypted P2P</Text>
+            <Text style={styles.cardHeader}>E2EE Message Composer</Text>
             <TextInput
               style={styles.input}
               placeholder="Recipient (e.g. did:sonaraim:+14155550199)"
@@ -182,37 +222,39 @@ export function InboxScreen({
               value={recipientDid}
               onChangeText={setRecipientDid}
             />
-            <TextInput
-              style={[styles.input, styles.multilineInput]}
-              placeholder="Encrypted message payload..."
-              placeholderTextColor="#64748b"
-              multiline
-              numberOfLines={3}
-              value={composerText}
-              onChangeText={setComposerText}
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, loading && styles.buttonDisabled]}
+
+            {quotingMessage ? (
+              <View style={styles.quoteBanner}>
+                <View>
+                  <Text style={styles.quoteSender}>Replying to {quotingMessage.sender || quotingMessage.senderDid}</Text>
+                  <Text style={styles.quoteText} numberOfLines={1}>{quotingMessage.text}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setQuotingMessage(null)}>
+                  <Text style={styles.quoteCancel}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+
+            <MediaComposer
+              onSend={handleSendMessage}
+              onTyping={handleTypingSignal}
               disabled={loading}
-              onPress={handleSendMessage}
-            >
-              {loading ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <Text style={styles.sendButtonText}>Send Message</Text>
-              )}
-            </TouchableOpacity>
+            />
           </View>
 
-          {/* Message List */}
-          {personalMessages.map((msg) => (
-            <View key={msg.id} style={styles.msgItem}>
-              <View style={styles.msgHeader}>
-                <Text style={styles.msgSender}>{msg.sender}</Text>
-                <Text style={styles.msgTime}>{msg.timestamp}</Text>
-              </View>
-              <Text style={styles.msgText}>{msg.text}</Text>
+          {isTyping && recipientDid ? (
+            <View style={styles.typingBanner}>
+              <Text style={styles.typingText}>Typing to {recipientDid}...</Text>
             </View>
+          ) : null}
+
+          {personalMessages.map((msg) => (
+            <PersonalMessageItem
+              key={msg.id}
+              msg={msg}
+              onToggleReaction={handleToggleReaction}
+              onQuoteReply={setQuotingMessage}
+            />
           ))}
         </View>
       ) : (
@@ -226,7 +268,6 @@ export function InboxScreen({
               <Text style={styles.serviceTenant}>{card.tenantDid}</Text>
               {card.summary ? <Text style={styles.serviceSummary}>{card.summary}</Text> : null}
 
-              {/* Zero-HTML Action Buttons */}
               <View style={styles.actionRow}>
                 {(card.actions || []).map((action) => (
                   <TouchableOpacity
@@ -245,40 +286,3 @@ export function InboxScreen({
     </ScrollView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#090d16' },
-  content: { padding: 16, paddingBottom: 40 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  headerTitle: { fontSize: 22, fontWeight: '700', color: '#f8fafc' },
-  refreshButton: { backgroundColor: '#1e293b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
-  refreshButtonText: { color: '#38bdf8', fontSize: 13, fontWeight: '600' },
-  tabContainer: { flexDirection: 'row', backgroundColor: '#0f172a', borderRadius: 8, padding: 4, marginBottom: 16 },
-  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 6 },
-  tabActive: { backgroundColor: '#0284c7' },
-  tabText: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  tabTextActive: { color: '#ffffff' },
-  composerCard: { backgroundColor: '#0f172a', borderRadius: 10, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#1e293b' },
-  cardHeader: { color: '#38bdf8', fontSize: 14, fontWeight: '600', marginBottom: 10 },
-  input: { backgroundColor: '#1e293b', color: '#f8fafc', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, marginBottom: 8 },
-  multilineInput: { minHeight: 60, textAlignVertical: 'top' },
-  sendButton: { backgroundColor: '#0284c7', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  sendButtonText: { color: '#ffffff', fontWeight: '600', fontSize: 14 },
-  buttonDisabled: { opacity: 0.6 },
-  msgItem: { backgroundColor: '#0f172a', borderRadius: 8, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#1e293b' },
-  msgHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-  msgSender: { color: '#38bdf8', fontSize: 12, fontWeight: '600' },
-  msgTime: { color: '#64748b', fontSize: 11 },
-  msgText: { color: '#f8fafc', fontSize: 14 },
-  serviceCard: { backgroundColor: '#0f172a', borderRadius: 10, padding: 14, marginBottom: 14, borderWidth: 1, borderColor: '#334155' },
-  serviceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  serviceTitle: { color: '#f8fafc', fontSize: 16, fontWeight: '700' },
-  verifiedBadge: { backgroundColor: '#065f46', color: '#34d399', fontSize: 10, fontWeight: '700', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  serviceTenant: { color: '#94a3b8', fontSize: 12, marginVertical: 4 },
-  serviceSummary: { color: '#cbd5e1', fontSize: 14, marginBottom: 12 },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  cardActionButton: { backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#38bdf8', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 },
-  cardActionText: { color: '#38bdf8', fontSize: 13, fontWeight: '600' },
-  errorBanner: { backgroundColor: '#7f1d1d', color: '#fecaca', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 },
-  feedbackBanner: { backgroundColor: '#064e3b', color: '#a7f3d0', padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 },
-});
