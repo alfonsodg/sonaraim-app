@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Sonaraim",
+    "slug": "sonaraim",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "sonaraim",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#090d16"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.sonaraim.app"
+    },
+    "android": {
+      "package": "org.sonaraim.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#090d16"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
