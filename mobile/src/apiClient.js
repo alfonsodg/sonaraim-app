@@ -212,6 +212,35 @@ export function createApiClient(customConfig = {}, dependencies = {}) {
 }
 
 /**
+ * Builds an external LiveKit Meet / WebRTC join URL from a LiveKit server URL and JWT token.
+ *
+ * @param {{
+ *   serverUrl: string,
+ *   token: string,
+ *   roomName?: string,
+ *   meetBaseUrl?: string
+ * }} params
+ * @returns {string} Joinable LiveKit Meet URL.
+ */
+export function buildLiveKitJoinUrl({
+  serverUrl,
+  token,
+  meetBaseUrl = 'https://meet.livekit.io/custom',
+} = {}) {
+  const cleanServer = String(serverUrl || '').trim();
+  const cleanToken = String(token || '').trim();
+  if (!cleanServer || !cleanToken) {
+    throw new Error('serverUrl and token are required');
+  }
+  const base = String(meetBaseUrl || 'https://meet.livekit.io/custom').replace(/\/+$/, '');
+  const query = new URLSearchParams({
+    liveKitUrl: cleanServer,
+    token: cleanToken,
+  });
+  return `${base}?${query.toString()}`;
+}
+
+/**
  * Singleton API client instance for application screens.
  */
 export const apiClient = createApiClient();

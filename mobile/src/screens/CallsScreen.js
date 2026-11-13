@@ -12,8 +12,9 @@ import {
   ScrollView,
   StyleSheet,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
-import { apiClient } from '../apiClient.js';
+import { apiClient, buildLiveKitJoinUrl } from '../apiClient.js';
 
 /**
  * Screen component for creating and joining encrypted LiveKit voice/video call rooms.
@@ -58,6 +59,26 @@ export function CallsScreen({
       setCallState('idle');
     } finally {
       setLoading(false);
+    }
+  }
+
+  /**
+   * Opens the LiveKit video/audio room in the external LiveKit Meet / WebRTC client.
+   */
+  async function handleOpenVideoRoom() {
+    if (!callSession?.serverUrl || !callSession?.token) {
+      setError('Call token not ready');
+      return;
+    }
+    try {
+      const joinUrl = buildLiveKitJoinUrl({
+        serverUrl: callSession.serverUrl,
+        token: callSession.token,
+        roomName: callSession.roomName,
+      });
+      await Linking.openURL(joinUrl);
+    } catch (err) {
+      setError(err.message || 'Unable to open LiveKit video room');
     }
   }
 
@@ -140,7 +161,11 @@ export function CallsScreen({
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.endCallButton} onPress={handleEndCall}>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleOpenVideoRoom}>
+            <Text style={styles.buttonText}>Open Video Room (LiveKit Meet)</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.endCallButton, { marginTop: 10 }]} onPress={handleEndCall}>
             <Text style={styles.endCallButtonText}>End Call Session</Text>
           </TouchableOpacity>
         </View>
