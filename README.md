@@ -1,10 +1,18 @@
 # SonarAIM Client Application (`sonaraim-app`)
 
-> Sovereign Cross-Platform Messaging Client with Dual Inbox Isolation, Zero-HTML Declarative Cards, React Native Mobile App, and Passkey Zero-Knowledge Vault
+> Sovereign Cross-Platform Messaging Client with Dual Inbox Isolation, Zero-HTML Declarative Cards, React Native Mobile App, and Passkey Zero-Knowledge Vault.
+
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Stack: React Native + Expo](https://img.shields.io/badge/Stack-React%20Native%20%2B%20Expo%2051-61DAFB.svg?logo=react&logoColor=black)](mobile/package.json)
+[![Calling: LiveKit WebRTC SFU](https://img.shields.io/badge/Calling-LiveKit%20WebRTC%20SFU-blue.svg)](mobile/src/callControlsLogic.js)
+[![Isolation: Dual Inbox Architecture](https://img.shields.io/badge/Isolation-Dual%20Inbox%20Architecture-purple.svg)](src/dualInbox.mjs)
+[![Identity: Passkey WebAuthn PRF](https://img.shields.io/badge/Identity-Passkey%20WebAuthn%20PRF-orange.svg)](src/zkVault.mjs)
 
 `sonaraim-app` (`@sonaraim/app`) is the core client runtime for the **SonarAIM** ecosystem. It powers Desktop (Tauri), Mobile (React Native / Expo for iOS and Android), and Progressive Web App (PWA) / App Clip experiences. It enforces cryptographic separation between human peer-to-peer conversations and verified business services while ensuring portable, end-to-end encrypted state backups across operating systems.
 
-## Core Capabilities
+---
+
+## ⚡ Core Capabilities
 
 - **Dual Inbox Architecture (`src/dualInbox.mjs`)**: Cryptographically segregates incoming IETF MLS (RFC 9420) envelopes into two strictly isolated streams:
   - `PERSONAL`: Sovereign human-to-human conversations authenticated via `did:sonaraim:` decentralized identifiers.
@@ -26,7 +34,97 @@
 - **Installable Mobile PWA (`src/phonePairing.mjs`)**: Standalone Progressive Web App manifest served at `/manifest.webmanifest`.
 - **React Native (Expo) Mobile App (`mobile/`)**: Full-featured sovereign mobile application for iOS and Android featuring Dual Inbox stream switching, WhatsApp-parity chat, native card actions, and encrypted call rooms.
 
-## Repository Structure
+---
+
+## 📸 Screenshots
+
+| Dual Inbox (Desktop Interface) | Dual Inbox (Mobile App Experience) | Instant Clip Smart Fallback |
+| :---: | :---: | :---: |
+| ![Dual Inbox Desktop](docs/images/app-inbox-desktop.png) | ![Dual Inbox Mobile](docs/images/app-inbox-mobile.png) | ![Instant Clip Smart Fallback](docs/images/app-instant-clip.png) |
+
+---
+
+## 🏗️ Cross-Platform Client Architecture
+
+The following ASCII diagram illustrates the segregation between personal and verified business streams, Passkey key derivation, and media pipelines:
+
+```text
++-----------------------------------------------------------------------------------+
+|                        SONARAIM CLIENT APP ARCHITECTURE                           |
++-----------------------------------------------------------------------------------+
+|                                                                                   |
+|  [Mobile User - iOS/Android]        [Desktop Companion]         [Instant Web Clip]|
+|  - React Native / Expo SDK 51       - Tauri / WebApp Companion  - Zero-install    |
+|  - Biometric Passkey WebAuthn       - 6-digit session pairing   - Rich Card view  |
+|            |                                |                           |         |
+|            v                                v                           v         |
+|  +-----------------------------------------------------------------------------+  |
+|  |                 CROSS-PLATFORM CLIENT RUNTIME (@sonaraim/app)               |  |
+|  +-------------------------------------+---------------------------------------+  |
+|                                        |                                          |
+|                +-----------------------+----------------------+                   |
+|                |                                              |                   |
+|                v                                              v                   |
+|  +---------------------------+              +----------------------------------+  |
+|  |   DUAL INBOX CONTROLLER   |              |   ZERO-HTML CARD RENDERER        |  |
+|  |     (dualInbox.mjs)       |              |  (cardRenderer.mjs, validator)   |  |
+|  |                           |              |                                  |  |
+|  | [PERSONAL INBOX]          |              | * Pure native declarative views  |  |
+|  | - P2P friends & family    |              | * Zero-WebView / Zero-XSS vector |  |
+|  | - did:sonaraim identities |              | * Ed25519 signature verification |  |
+|  |                           |              | * Signed user action dispatch    |  |
+|  | [SERVICES INBOX]          |              +-----------------+----------------+  |
+|  | - Verified did:web brands |                                |                   |
+|  | - Gated by ConsentToken   |                                |                   |
+|  +-------------+-------------+                                |                   |
+|                |                                              |                   |
+|                +-----------------------+----------------------+                   |
+|                                        |                                          |
+|                                        v                                          |
+|  +-----------------------------------------------------------------------------+  |
+|  |                  SECURITY & REAL-TIME MULTIMEDIA ENGINE                     |  |
+|  |  - Passkey WebAuthn PRF Zero-Knowledge Vault (zkVault.mjs: HKDF -> AES-GCM) |  |
+|  |  - MLS Group Ratchet Manager with forward secrecy (groupManager.js)        |  |
+|  |  - Client-Side AES-256-GCM Media Crypto & S3 Presigned Upload (mediaCrypto)|  |
+|  |  - LiveKit WebRTC E2EE Voice & Video Calling Rooms (callControlsLogic.js)   |  |
+|  |  - WhatsApp Parity: Reactions, Quotes, Receipts, 24h Status (chatFeatures)  |  |
+|  +-------------------------------------+---------------------------------------+  |
+|                                        |                                          |
+|                                        v Envelopes & PSI                          |
+|                       +----------------------------------+                        |
+|                       |          sonaraim-node           |                        |
+|                       |    (P2P Store-and-Forward Mesh)  |                        |
+|                       +----------------------------------+                        |
+|                                                                                   |
++-----------------------------------------------------------------------------------+
+```
+
+> [!NOTE]
+> For full Mermaid sequence diagrams of Passkey derivation, Dual Inbox routing, and LiveKit WebRTC signaling, see [docs/DIAGRAMS.md](docs/DIAGRAMS.md).
+
+---
+
+## 📊 HTTP API Endpoints
+
+The core web runtime (`src/server.mjs`) exposes the following endpoints:
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/health` | `GET` | Health check probe returning service status and timestamp |
+| `/manifest.webmanifest` | `GET` | W3C Web App Manifest for mobile PWA installation |
+| `/auth/phone/register` | `POST` | E.164 phone registration and blinded token issuance |
+| `/auth/devices/pair` | `POST` | 6-digit numeric companion device pairing session creation and redemption |
+| `/auth/passkey/challenge` | `POST` | WebAuthn authentication challenge generation |
+| `/auth/passkey/verify` | `POST` | WebAuthn assertion verification and session cookie issuance |
+| `/inbox` | `GET` | Protected Dual Inbox view (HTML or JSON) |
+| `/inbox/messages` | `POST` | Outgoing encrypted P2P message dispatch to Node relay |
+| `/api/calls/token` | `POST` | LiveKit encrypted room token minting |
+| `/api/contacts/discover`| `POST` | Blinded identifier Private Set Intersection (PSI) contact discovery |
+| `/api/mailbox/:id` | `GET` | Mailbox envelopes retrieval |
+
+---
+
+## 🧩 Repository Structure
 
 ```text
 sonaraim-app/
@@ -83,25 +181,9 @@ sonaraim-app/
 └── README.md                # Project overview and quickstart
 ```
 
-## HTTP API Endpoints
+---
 
-The core web runtime (`src/server.mjs`) exposes the following endpoints:
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/health` | `GET` | Health check probe returning service status and timestamp |
-| `/manifest.webmanifest` | `GET` | W3C Web App Manifest for mobile PWA installation |
-| `/auth/phone/register` | `POST` | E.164 phone registration and blinded token issuance |
-| `/auth/devices/pair` | `POST` | 6-digit numeric companion device pairing session creation and redemption |
-| `/auth/passkey/challenge` | `POST` | WebAuthn authentication challenge generation |
-| `/auth/passkey/verify` | `POST` | WebAuthn assertion verification and session cookie issuance |
-| `/inbox` | `GET` | Protected Dual Inbox view (HTML or JSON) |
-| `/inbox/messages` | `POST` | Outgoing encrypted P2P message dispatch to Node relay |
-| `/api/calls/token` | `POST` | LiveKit encrypted room token minting |
-| `/api/contacts/discover`| `POST` | Blinded identifier Private Set Intersection (PSI) contact discovery |
-| `/api/mailbox/:id` | `GET` | Mailbox envelopes retrieval |
-
-## Quickstart
+## 🚀 Quickstart
 
 ### Prerequisites
 
@@ -135,7 +217,9 @@ npm run build:android    # eas build --platform android --profile production (AA
 npm run build:ios        # eas build --platform ios --profile production (IPA)
 ```
 
-## Documentation
+---
+
+## 📄 Documentation
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [System Diagrams](docs/DIAGRAMS.md)
@@ -145,6 +229,8 @@ npm run build:ios        # eas build --platform ios --profile production (IPA)
 - [Code of Conduct](CODE_OF_CONDUCT.md)
 - [Security Policy](SECURITY.md)
 
-## License
+---
+
+## 📜 License
 
 Copyright 2026 Sonaraim Contributors. Licensed under the [Apache License, Version 2.0](LICENSE).
