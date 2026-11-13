@@ -11,14 +11,32 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "org.sonaraim.app"
+      "bundleIdentifier": "org.sonaraim.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Sonaraim needs camera access to send end-to-end encrypted photos, videos, and scan pairing QR codes.",
+        "NSMicrophoneUsageDescription": "Sonaraim needs microphone access for encrypted voice notes and LiveKit audio/video calls.",
+        "NSPhotoLibraryUsageDescription": "Sonaraim needs photo library access to encrypt and share images and videos."
+      }
     },
     "android": {
       "package": "org.sonaraim.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "POST_NOTIFICATIONS",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#090d16"
       }
     },
+    "plugins": [
+      "expo-image-picker",
+      "expo-av",
+      "expo-notifications",
+      "expo-secure-store"
+    ],
     "web": {
       "bundler": "metro"
     }
