@@ -33,7 +33,9 @@ All configurable parameters in `sonaraim-app` are loaded dynamically from enviro
 | `SONARAIM_VAULT_SCRYPT_PARALLELIZATION` | `1` | Parallelization parameter `p` for scrypt hardening |
 | `SONARAIM_LOG_LEVEL` | `INFO` | Structured JSON logging verbosity (`ERROR`, `WARN`, `INFO`, `DEBUG`) |
 
-## 2. React Native Mobile Environment Variables (`mobile/`)
+## 2. React Native Mobile Environment & Native Configuration (`mobile/`)
+
+### 2.1 Mobile Environment Variables
 
 The React Native Expo application in `mobile/` resolves its configuration via `mobile/src/config.js` using standard Expo public variables (`EXPO_PUBLIC_*`):
 
@@ -44,6 +46,46 @@ The React Native Expo application in `mobile/` resolves its configuration via `m
 | `EXPO_PUBLIC_LIVEKIT_URL` | `wss://livekit.sonaraim.internal` | Target LiveKit SFU server WebSocket URL |
 | `EXPO_PUBLIC_DOMAIN_SALT` | `sonaraim-mobile-v1` | Domain separation salt for local PSI identifier blinding |
 | `EXPO_PUBLIC_REQUEST_TIMEOUT_MS` | `8000` | Client HTTP request timeout in milliseconds |
+
+### 2.2 Native Hardware Bridges & Permissions (`mobile/src/nativeDeviceBridge.js`)
+
+Hardware access is encapsulated in `nativeDeviceBridge.js` and declared in `mobile/app.json`:
+
+| Module | Native Capability | Usage & Configuration |
+| :--- | :--- | :--- |
+| `expo-image-picker` | Photo library & camera | `pickMediaAsset`: Prompts user permission and returns URI, MIME type, and file size for AES-256-GCM encryption in `mediaCrypto.js`. |
+| `expo-av` | Microphone & audio recording | `startVoiceRecording`: Manages voice note recording lifecycle (`prepareToRecordAsync`, `startAsync`, `stopAndUnloadAsync`). |
+| `expo-notifications` | Push notification service | `acquireDevicePushToken`: Obtains OS device push token for blind APNs/FCM wake-up registration via `statusStore.js`. |
+| `expo-secure-store` | Hardware Keychain / KeyStore | `saveSecureValue` / `readSecureValue`: Persists sensitive identity credentials, DID keys, and MLS ratchet epoch keys. |
+
+### 2.3 WhatsApp-Parity Application Architecture
+
+Milestone 14 introduces client modules delivering full WhatsApp feature parity over sovereign E2EE protocols:
+
+| Module | Purpose | Key Functions & Interfaces |
+| :--- | :--- | :--- |
+| `mediaCrypto.js` | E2EE multimedia crypto & catalogs | `encryptMediaBuffer`, `decryptMediaBuffer`, `createMediaPointer`, `requestPresignedUpload`, `getEmojiCatalog`, `getStickerCatalog`, `searchGifs`. Uses AES-256-GCM authenticated encryption. |
+| `groupManager.js` | MLS ratcheted group chats | `createGroup` (epoch 0), `addGroupMember` (ratchets epoch key forward), `removeGroupMember` (ratchets key, restricting future epochs), `appendGroupMessage`, `decryptGroupMessage`. |
+| `chatFeatures.js` | Rich conversational interactions | `toggleReaction` (aggregates emoji counts), `buildQuoteReply` (references target message ID), `advanceReceiptStatus` (`sent` -> `delivered` -> `read`), `sendRelaySignal` (dispatches ephemeral typing/receipt signals). |
+| `statusStore.js` | 24-hour ephemeral Status/Stories | `createStatusItem`, `filterActiveStatuses` (enforces `DEFAULT_STATUS_TTL_SECONDS = 86400`), `deriveBlindPushToken`, `registerPushToken` (submits blind SHA-256 hash to node relay). |
+| `callControlsLogic.js` | In-app WebRTC call controls | `createInitialCallState`, `resolveCallAction` (handles `toggleMic`, `toggleCamera`, `toggleSpeaker`, and `endCall`). |
+
+### 2.4 EAS Native Build Profiles (`mobile/eas.json`)
+
+Build profiles for Expo Application Services (EAS) enable native binary compilation:
+
+| Profile | Platform | Build Type / Distribution | Output Artifact |
+| :--- | :--- | :--- | :--- |
+| `development` | Android / iOS | `developmentClient: true`, internal distribution | Debug APK / iOS Simulator build |
+| `preview` | Android / iOS | `distribution: "internal"` | Standalone APK / iOS Ad-Hoc IPA |
+| `production` | Android / iOS | Store-ready distribution | Android App Bundle (AAB) / iOS App Store IPA |
+
+Native build scripts in `mobile/package.json`:
+
+```bash
+npm run build:android    # eas build --platform android --profile production
+npm run build:ios        # eas build --platform ios --profile production
+```
 
 ## 3. Core Server HTTP Endpoints Reference
 

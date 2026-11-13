@@ -12,9 +12,19 @@
 - **Zero-HTML Declarative Card Engine (`src/cardRenderer.mjs`, `mobile/src/cardValidator.js`)**: Eliminates WebView, HTML, CSS, and script injection surfaces by parsing cryptographically signed (`Ed25519`) declarative JSON schemas into native view trees and emitting signed user action intents.
 - **Passkey WebAuthn PRF Zero-Knowledge Vault (`src/zkVault.mjs`)**: Derives 256-bit symmetric keys from hardware-backed Passkey WebAuthn `prf` extension outputs via domain-separated HKDF, encrypting MLS ratchet state and history snapshots with authenticated `AES-256-GCM`.
 - **E.164 Phone Identity & Companion Device Pairing (`src/phonePairing.mjs`)**: Supports WhatsApp-like onboarding via international phone numbers (`+...`), HMAC-blinded identity pseudonymization, and 6-digit / QR pairing sessions (`sonaraim://pair?...`) linking desktop or web companion clients.
-- **LiveKit Encrypted Calling (`src/contactDiscovery.mjs`, `mobile/src/screens/CallsScreen.js`)**: Real-time end-to-end encrypted voice and video room token issuance via `/api/calls/token`.
+- **LiveKit Encrypted Calling (`src/contactDiscovery.mjs`, `mobile/src/screens/CallsScreen.js`, `mobile/src/callControlsLogic.js`)**: Real-time end-to-end encrypted voice and video room token issuance via `/api/calls/token` and in-app WebRTC call controls.
+- **E2EE Multimedia Crypto & Catalogs (`mobile/src/mediaCrypto.js`)**: Client-side AES-256-GCM encryption and decryption for media attachments, canonical media pointer generation, presigned S3/MinIO upload requests, emoji and sticker catalogs, and filtered GIF search.
+- **MLS Group Chats & Ratchet Management (`mobile/src/groupManager.js`)**: Ratcheted group messaging with epoch progression, forward secrecy, and key re-generation when adding or removing group members.
+- **WhatsApp-Parity Chat Interactions (`mobile/src/chatFeatures.js`)**: Emoji reactions toggling with aggregated counts, quote replies referencing original messages, delivery/read receipts (`sent` -> `delivered` -> `read`), and ephemeral typing indicator signals.
+- **24-Hour Ephemeral Status & Stories (`mobile/src/statusStore.js`)**: Ephemeral 24h status timeline with automatic TTL expiration (`DEFAULT_STATUS_TTL_SECONDS = 86400`), blind push wake token derivation, and silent push registration on the node relay.
+- **Native Hardware Bridges & Expo Modules (`mobile/src/nativeDeviceBridge.js`)**: Modular wrappers connecting native device capabilities:
+  - `expo-image-picker`: Camera and photo library asset picker.
+  - `expo-av`: Voice note audio recording lifecycle.
+  - `expo-notifications`: OS push notification token acquisition.
+  - `expo-secure-store`: Hardware-backed secure storage for private identity credentials.
+- **EAS Native Build Automation (`mobile/eas.json`)**: Pre-configured build profiles (`development`, `preview`, `production`) for Expo Application Services (EAS) to compile native Android (AAB/APK) and iOS (IPA) release packages.
 - **Installable Mobile PWA (`src/phonePairing.mjs`)**: Standalone Progressive Web App manifest served at `/manifest.webmanifest`.
-- **React Native (Expo) Mobile App (`mobile/`)**: Modular native application for iOS and Android featuring native activation, Dual Inbox stream switching, declarative card actions, and encrypted call rooms.
+- **React Native (Expo) Mobile App (`mobile/`)**: Full-featured sovereign mobile application for iOS and Android featuring Dual Inbox stream switching, WhatsApp-parity chat, native card actions, and encrypted call rooms.
 
 ## Repository Structure
 
@@ -28,18 +38,27 @@ sonaraim-app/
 ├── mobile/                  # React Native (Expo) Mobile Application
 │   ├── app.json             # Expo mobile manifest & bundle configuration
 │   ├── App.js               # Mobile root entrypoint
+│   ├── eas.json             # EAS native build profiles (dev, preview, prod)
 │   ├── package.json         # Mobile dependencies and test scripts
 │   ├── src/
 │   │   ├── apiClient.js     # HTTP client for app web & node endpoints
 │   │   ├── AppShell.js      # Bottom tab navigation & identity state
+│   │   ├── callControlsLogic.js # In-app call control logic (mic, cam, speaker)
 │   │   ├── cardValidator.js # Zero-HTML declarative card validator
+│   │   ├── chatFeatures.js  # Reactions, quote replies, typing, and receipts
+│   │   ├── components/      # UI components (MediaComposer, CallControls, etc.)
 │   │   ├── config.js        # Mobile environment configuration resolver
-│   │   └── screens/
-│   │       ├── ActivationScreen.js  # E.164 activation & QR pairing UI
-│   │       ├── CallsScreen.js       # LiveKit encrypted calling launcher
-│   │       └── InboxScreen.js       # Dual Inbox & card action buttons
+│   │   ├── groupManager.js  # MLS ratcheted group chat manager
+│   │   ├── mediaCrypto.js   # AES-256-GCM media crypto & catalog helpers
+│   │   ├── nativeDeviceBridge.js # Hardware bridges (picker, audio, push, vault)
+│   │   ├── screens/         # Activation, Calls, Groups, Inbox, Status screens
+│   │   ├── statusStore.js   # 24h status timeline and blind push tokens
+│   │   └── styles/          # Modular component styles
 │   └── tests/
-│       └── mobile.test.mjs  # Automated node:test mobile verification suite
+│       ├── calls.test.mjs
+│       ├── mobile.test.mjs
+│       ├── nativeBridge.test.mjs
+│       └── whatsappParity.test.mjs
 ├── samples/
 │   └── .env.example         # Sample environment configuration
 ├── src/                     # Core Web & PWA Server Engine
@@ -106,6 +125,14 @@ npm test
 ```bash
 cd mobile
 npx expo start
+```
+
+### Build Native Mobile App Bundles (EAS)
+
+```bash
+cd mobile
+npm run build:android    # eas build --platform android --profile production (AAB)
+npm run build:ios        # eas build --platform ios --profile production (IPA)
 ```
 
 ## Documentation
