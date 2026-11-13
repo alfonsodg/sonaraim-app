@@ -291,6 +291,7 @@ test('Issue #9: decode live Node items[].payload_hex into Dual Inbox streams and
       text: 'See you tomorrow!',
     });
     assert.equal(directSend.delivered, true);
+    assert.equal(storedItems.length, 3);
 
     // 3. Verify fetchMailboxEnvelopes decodes payload_hex
     const synced = await fetchMailboxEnvelopes(mockNodeUrl, 'did:sonaraim:bob');

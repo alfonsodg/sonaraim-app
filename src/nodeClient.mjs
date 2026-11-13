@@ -128,6 +128,7 @@ export async function sendP2pEnvelopeToNode(nodeApiBaseUrl, message, timeoutMs =
     },
     body: JSON.stringify({
       envelope_id: envelopeId,
+      recipient_mailbox_id: recipientDid,
       sender_did: senderDid,
       recipient_did: recipientDid,
       payload_hex: payloadHex,
