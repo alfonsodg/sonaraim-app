@@ -29,13 +29,15 @@ import {
  * }} config
  * @returns {http.RequestListener}
  */
-export function createAppRequestHandler(config) {
+export function createAppRequestHandler(config = {}) {
+  const safeConfig = config && typeof config === 'object' ? config : {};
   const { privateKey: sessionPrivateKey } = crypto.generateKeyPairSync('ed25519');
   const sessionSecret =
-    String(config.sessionSecret || process.env.SONARAIM_SESSION_SECRET || '').trim() ||
+    String(safeConfig.sessionSecret || process.env.SONARAIM_SESSION_SECRET || '').trim() ||
     crypto.randomBytes(32).toString('hex');
-  const requireAuth =
-    config.requireAuth === true || process.env.SONARAIM_REQUIRE_AUTH === 'true';
+  const requireAuth = !(
+    safeConfig.requireAuth === false || process.env.SONARAIM_ALLOW_DEV_NOAUTH === 'true'
+  );
   const challengeStore = new Map();
   const pairingStore = new Map();
 

@@ -78,6 +78,7 @@ test('startAppTestServer serves /health, /inbox, and /c/:token routes', async ()
   const { baseUrl, close } = await startAppTestServer({
     nodeApiBaseUrl: 'http://127.0.0.1:8090',
     appHttpPort: 0,
+    requireAuth: false,
   });
 
   try {
