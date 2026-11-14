@@ -1,20 +1,74 @@
 /**
  * @fileoverview MLS (RFC 9420-style) E2EE Group Ratchet and Messaging Manager.
  * Aligned with `sonaraim-protocol/src/mls_group.rs` epoch key evolution and transcript digests.
+ * Uses WebCrypto (`globalThis.crypto.subtle`) and `Uint8Array` for Hermes/Metro compatibility.
  */
 
-import crypto from 'node:crypto';
+import {
+  bytesToHex,
+  concatBytes,
+  decodeUtf8,
+  decryptAesGcm,
+  encodeUtf8,
+  encryptAesGcm,
+  hexToBytes,
+  hmacSha256Bytes,
+  randomBytes,
+  sha256Bytes,
+} from './cryptoUtils.js';
 
 /**
- * Encodes a 64-bit unsigned integer into an 8-byte big-endian Buffer.
+ * Encodes a 64-bit unsigned integer into an 8-byte big-endian `Uint8Array`.
  *
  * @param {number} num - Epoch counter.
- * @returns {Buffer} 8-byte big-endian buffer.
+ * @returns {Uint8Array} 8-byte big-endian byte array.
  */
-function toEpochBuffer(num) {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64BE(BigInt(num), 0);
-  return buf;
+function toEpochBytes(num) {
+  const bytes = new Uint8Array(8);
+  const view = new DataView(bytes.buffer);
+  view.setBigUint64(0, BigInt(num), false);
+  return bytes;
+}
+
+/**
+ * Advances group epoch key and transcript digest for a membership change event.
+ *
+ * @param {Record<string, any>} groupState - Current group state.
+ * @param {Array<string>} newMembers - Updated member list for the next epoch.
+ * @param {string} eventTag - Membership event label (`add:<did>` or `remove:<did>`).
+ * @returns {Promise<Record<string, any>>} Updated group state at `epoch + 1`.
+ */
+async function ratchetGroupEpoch(groupState, newMembers, eventTag) {
+  const nextEpoch = groupState.epoch + 1;
+  const epochBytes = toEpochBytes(nextEpoch);
+  const eventBytes = encodeUtf8(eventTag);
+
+  const prevKey = hexToBytes(groupState.currentEpochKeyHex);
+  const context = concatBytes(encodeUtf8(groupState.groupId), epochBytes, eventBytes);
+  const nextKey = await hmacSha256Bytes(prevKey, context);
+
+  const prevTranscript = hexToBytes(groupState.transcriptDigestHex);
+  const chainInput = concatBytes(prevTranscript, epochBytes, eventBytes);
+  const nextTranscript = await sha256Bytes(chainInput);
+
+  const nextKeyHex = bytesToHex(nextKey);
+  const nextTranscriptHex = bytesToHex(nextTranscript);
+
+  return {
+    ...groupState,
+    epoch: nextEpoch,
+    members: newMembers,
+    currentEpochKeyHex: nextKeyHex,
+    transcriptDigestHex: nextTranscriptHex,
+    epochKeys: {
+      ...groupState.epochKeys,
+      [nextEpoch]: nextKeyHex,
+    },
+    epochMembers: {
+      ...groupState.epochMembers,
+      [nextEpoch]: [...newMembers],
+    },
+  };
 }
 
 /**
@@ -25,10 +79,10 @@ function toEpochBuffer(num) {
  *   creatorDid: string,
  *   title?: string,
  *   initialMembers?: Array<string>
- * }} params
- * @returns {Record<string, any>} Initialized group state object.
+ * }} params - Group initialization parameters.
+ * @returns {Promise<Record<string, any>>} Initialized group state object.
  */
-export function createGroup({
+export async function createGroup({
   groupId,
   creatorDid,
   title = 'E2EE Group',
@@ -43,27 +97,26 @@ export function createGroup({
   const memberSet = new Set([cleanCreator, ...initialMembers.map(String)]);
   const members = Array.from(memberSet);
 
-  const seedKey = crypto
-    .createHmac('sha256', Buffer.from(cleanId, 'utf8'))
-    .update(Buffer.from(cleanCreator, 'utf8'))
-    .digest();
+  const seedKey = await hmacSha256Bytes(encodeUtf8(cleanId), encodeUtf8(cleanCreator));
+  const initTranscript = concatBytes(
+    encodeUtf8('sonaraim-mls-transcript-v1:'),
+    encodeUtf8(cleanId),
+    encodeUtf8(':'),
+    encodeUtf8(cleanCreator)
+  );
+  const transcriptDigest = await sha256Bytes(initTranscript);
 
-  const initTranscript = Buffer.concat([
-    Buffer.from('sonaraim-mls-transcript-v1:', 'utf8'),
-    Buffer.from(cleanId, 'utf8'),
-    Buffer.from(':', 'utf8'),
-    Buffer.from(cleanCreator, 'utf8'),
-  ]);
-  const transcriptDigest = crypto.createHash('sha256').update(initTranscript).digest();
+  const seedKeyHex = bytesToHex(seedKey);
+  const transcriptDigestHex = bytesToHex(transcriptDigest);
 
   return {
     groupId: cleanId,
     title: String(title || 'E2EE Group'),
     epoch: 0,
     members,
-    currentEpochKeyHex: seedKey.toString('hex'),
-    transcriptDigestHex: transcriptDigest.toString('hex'),
-    epochKeys: { 0: seedKey.toString('hex') },
+    currentEpochKeyHex: seedKeyHex,
+    transcriptDigestHex,
+    epochKeys: { 0: seedKeyHex },
     epochMembers: { 0: [...members] },
     messages: [],
   };
@@ -74,49 +127,15 @@ export function createGroup({
  *
  * @param {Record<string, any>} groupState - Current group state.
  * @param {string} newMemberDid - DID to add.
- * @returns {Record<string, any>} Updated group state.
+ * @returns {Promise<Record<string, any>>} Updated group state.
  */
-export function addGroupMember(groupState, newMemberDid) {
+export async function addGroupMember(groupState, newMemberDid) {
   const did = String(newMemberDid || '').trim();
   if (groupState.members.includes(did)) {
     throw new Error(`Member already in group: ${did}`);
   }
-
-  const nextEpoch = groupState.epoch + 1;
   const newMembers = [...groupState.members, did];
-  const eventBytes = Buffer.from(`add:${did}`, 'utf8');
-
-  const prevKey = Buffer.from(groupState.currentEpochKeyHex, 'hex');
-  const context = Buffer.concat([
-    Buffer.from(groupState.groupId, 'utf8'),
-    toEpochBuffer(nextEpoch),
-    eventBytes,
-  ]);
-  const nextKey = crypto.createHmac('sha256', prevKey).update(context).digest();
-
-  const prevTranscript = Buffer.from(groupState.transcriptDigestHex, 'hex');
-  const chainInput = Buffer.concat([
-    prevTranscript,
-    toEpochBuffer(nextEpoch),
-    eventBytes,
-  ]);
-  const nextTranscript = crypto.createHash('sha256').update(chainInput).digest();
-
-  return {
-    ...groupState,
-    epoch: nextEpoch,
-    members: newMembers,
-    currentEpochKeyHex: nextKey.toString('hex'),
-    transcriptDigestHex: nextTranscript.toString('hex'),
-    epochKeys: {
-      ...groupState.epochKeys,
-      [nextEpoch]: nextKey.toString('hex'),
-    },
-    epochMembers: {
-      ...groupState.epochMembers,
-      [nextEpoch]: [...newMembers],
-    },
-  };
+  return ratchetGroupEpoch(groupState, newMembers, `add:${did}`);
 }
 
 /**
@@ -124,75 +143,40 @@ export function addGroupMember(groupState, newMemberDid) {
  *
  * @param {Record<string, any>} groupState - Current group state.
  * @param {string} memberDid - DID to remove.
- * @returns {Record<string, any>} Updated group state.
+ * @returns {Promise<Record<string, any>>} Updated group state.
  */
-export function removeGroupMember(groupState, memberDid) {
+export async function removeGroupMember(groupState, memberDid) {
   const did = String(memberDid || '').trim();
   if (!groupState.members.includes(did)) {
     throw new Error(`DID is not an active member: ${did}`);
   }
-
-  const nextEpoch = groupState.epoch + 1;
   const newMembers = groupState.members.filter((m) => m !== did);
-  const eventBytes = Buffer.from(`remove:${did}`, 'utf8');
-
-  const prevKey = Buffer.from(groupState.currentEpochKeyHex, 'hex');
-  const context = Buffer.concat([
-    Buffer.from(groupState.groupId, 'utf8'),
-    toEpochBuffer(nextEpoch),
-    eventBytes,
-  ]);
-  const nextKey = crypto.createHmac('sha256', prevKey).update(context).digest();
-
-  const prevTranscript = Buffer.from(groupState.transcriptDigestHex, 'hex');
-  const chainInput = Buffer.concat([
-    prevTranscript,
-    toEpochBuffer(nextEpoch),
-    eventBytes,
-  ]);
-  const nextTranscript = crypto.createHash('sha256').update(chainInput).digest();
-
-  return {
-    ...groupState,
-    epoch: nextEpoch,
-    members: newMembers,
-    currentEpochKeyHex: nextKey.toString('hex'),
-    transcriptDigestHex: nextTranscript.toString('hex'),
-    epochKeys: {
-      ...groupState.epochKeys,
-      [nextEpoch]: nextKey.toString('hex'),
-    },
-    epochMembers: {
-      ...groupState.epochMembers,
-      [nextEpoch]: [...newMembers],
-    },
-  };
+  return ratchetGroupEpoch(groupState, newMembers, `remove:${did}`);
 }
 
 /**
  * Appends and encrypts an application message for the current epoch.
  *
  * @param {Record<string, any>} groupState - Group state.
- * @param {{ senderDid: string, text: string, mediaPointer?: any }} params
- * @returns {Record<string, any>} Encrypted message envelope.
+ * @param {{ senderDid: string, text: string, mediaPointer?: any }} params - Message parameters.
+ * @returns {Promise<Record<string, any>>} Encrypted message envelope.
  */
-export function appendGroupMessage(groupState, { senderDid, text, mediaPointer = null }) {
+export async function appendGroupMessage(groupState, { senderDid, text, mediaPointer = null }) {
   if (!groupState.members.includes(senderDid)) {
     throw new Error(`Sender is not an active member: ${senderDid}`);
   }
 
   const epoch = groupState.epoch;
-  const keyBuffer = Buffer.from(groupState.epochKeys[epoch], 'hex');
-  const ivBuffer = crypto.randomBytes(12);
-  const aad = Buffer.from(`${groupState.groupId}:${epoch}`, 'utf8');
+  const keyBytes = hexToBytes(groupState.epochKeys[epoch]);
+  const ivBytes = randomBytes(12);
+  const aad = encodeUtf8(`${groupState.groupId}:${epoch}`);
 
-  const cipher = crypto.createCipheriv('aes-256-gcm', keyBuffer, ivBuffer);
-  cipher.setAAD(aad);
-  const ciphertext = Buffer.concat([
-    cipher.update(Buffer.from(text, 'utf8')),
-    cipher.final(),
-  ]);
-  const authTag = cipher.getAuthTag();
+  const { ciphertext, authTag } = await encryptAesGcm({
+    keyBytes,
+    ivBytes,
+    plaintextBytes: encodeUtf8(text),
+    additionalDataBytes: aad,
+  });
 
   const message = {
     id: `grp-msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -200,9 +184,9 @@ export function appendGroupMessage(groupState, { senderDid, text, mediaPointer =
     epoch,
     senderDid,
     text,
-    ciphertextHex: ciphertext.toString('hex'),
-    authTagHex: authTag.toString('hex'),
-    ivHex: ivBuffer.toString('hex'),
+    ciphertextHex: bytesToHex(ciphertext),
+    authTagHex: bytesToHex(authTag),
+    ivHex: bytesToHex(ivBytes),
     mediaPointer,
     timestamp: Date.now(),
   };
@@ -217,9 +201,9 @@ export function appendGroupMessage(groupState, { senderDid, text, mediaPointer =
  * @param {Record<string, any>} groupState - Group state.
  * @param {Record<string, any>} message - Message envelope.
  * @param {string} requesterDid - DID requesting decryption.
- * @returns {string} Decrypted plaintext text.
+ * @returns {Promise<string>} Decrypted plaintext text.
  */
-export function decryptGroupMessage(groupState, message, requesterDid) {
+export async function decryptGroupMessage(groupState, message, requesterDid) {
   const allowed = groupState.epochMembers[message.epoch];
   if (!allowed || !allowed.includes(requesterDid)) {
     throw new Error(`Requester is not authorized to decrypt epoch ${message.epoch}`);
@@ -230,15 +214,12 @@ export function decryptGroupMessage(groupState, message, requesterDid) {
     throw new Error(`Unknown epoch key for epoch ${message.epoch}`);
   }
 
-  const keyBuffer = Buffer.from(keyHex, 'hex');
-  const ivBuffer = Buffer.from(message.ivHex, 'hex');
-  const authTag = Buffer.from(message.authTagHex, 'hex');
-  const ciphertext = Buffer.from(message.ciphertextHex, 'hex');
-  const aad = Buffer.from(`${message.groupId}:${message.epoch}`, 'utf8');
-
-  const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, ivBuffer);
-  decipher.setAAD(aad);
-  decipher.setAuthTag(authTag);
-  const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  return decrypted.toString('utf8');
+  const decrypted = await decryptAesGcm({
+    keyBytes: hexToBytes(keyHex),
+    ivBytes: hexToBytes(message.ivHex),
+    ciphertextBytes: hexToBytes(message.ciphertextHex),
+    authTagBytes: hexToBytes(message.authTagHex),
+    additionalDataBytes: encodeUtf8(`${message.groupId}:${message.epoch}`),
+  });
+  return decodeUtf8(decrypted);
 }

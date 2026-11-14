@@ -72,7 +72,7 @@ export function StatusScreen({
     setError('');
     try {
       const nowSecs = Math.floor(Date.now() / 1000);
-      const blindToken = deriveBlindPushToken(currentUserDid, 'reg-wake', nowSecs);
+      const blindToken = await deriveBlindPushToken(currentUserDid, 'reg-wake', nowSecs);
       await registerPushToken({
         nodeApiUrl: apiClient.config.nodeApiUrl,
         userDid: currentUserDid,

@@ -3,7 +3,7 @@
  * Manages MLS-ratcheted group creation, member additions/removals, and encrypted group threads.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import {
   createGroup,
@@ -26,22 +26,32 @@ export function GroupsScreen({
   currentUserDid = 'did:sonaraim:mobile-user',
   initialGroups = [],
 } = {}) {
-  const [groups, setGroups] = useState(() => {
-    if (initialGroups.length > 0) return initialGroups;
-    const defaultGroup = createGroup({
-      groupId: 'grp-core-community',
-      creatorDid: currentUserDid,
-      title: 'Sonaraim Core Community',
-      initialMembers: ['did:sonaraim:+14155550199'],
-    });
-    appendGroupMessage(defaultGroup, {
-      senderDid: currentUserDid,
-      text: 'Welcome to the zero-knowledge E2EE group thread!',
-    });
-    return [defaultGroup];
-  });
+  const [groups, setGroups] = useState(() => initialGroups);
+  const [activeGroupId, setActiveGroupId] = useState(initialGroups[0]?.groupId || '');
 
-  const [activeGroupId, setActiveGroupId] = useState(groups[0]?.groupId || '');
+  useEffect(() => {
+    if (initialGroups.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      const defaultGroup = await createGroup({
+        groupId: 'grp-core-community',
+        creatorDid: currentUserDid,
+        title: 'Sonaraim Core Community',
+        initialMembers: ['did:sonaraim:+14155550199'],
+      });
+      await appendGroupMessage(defaultGroup, {
+        senderDid: currentUserDid,
+        text: 'Welcome to the zero-knowledge E2EE group thread!',
+      });
+      if (!cancelled) {
+        setGroups([defaultGroup]);
+        setActiveGroupId(defaultGroup.groupId);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUserDid, initialGroups.length]);
   const [newGroupTitle, setNewGroupTitle] = useState('');
   const [newGroupMember, setNewGroupMember] = useState('');
   const [addMemberInput, setAddMemberInput] = useState('');
@@ -54,7 +64,7 @@ export function GroupsScreen({
   /**
    * Handles creating a new E2EE group.
    */
-  function handleCreateGroup() {
+  async function handleCreateGroup() {
     if (!newGroupTitle.trim()) {
       setError('Group title is required');
       return;
@@ -63,7 +73,7 @@ export function GroupsScreen({
     const id = `grp-${Date.now()}`;
     const members = newGroupMember.trim() ? [newGroupMember.trim()] : [];
     try {
-      const created = createGroup({
+      const created = await createGroup({
         groupId: id,
         creatorDid: currentUserDid,
         title: newGroupTitle.trim(),
@@ -82,11 +92,11 @@ export function GroupsScreen({
   /**
    * Adds a new member to the active group and ratchets key.
    */
-  function handleAddMember() {
+  async function handleAddMember() {
     if (!activeGroup || !addMemberInput.trim()) return;
     setError('');
     try {
-      const updated = addGroupMember(activeGroup, addMemberInput.trim());
+      const updated = await addGroupMember(activeGroup, addMemberInput.trim());
       setGroups((prev) => prev.map((g) => (g.groupId === updated.groupId ? updated : g)));
       setAddMemberInput('');
       setFeedback(`Added member. Ratcheted to epoch ${updated.epoch}`);
@@ -99,11 +109,11 @@ export function GroupsScreen({
    * Removes a member from the active group and ratchets key.
    * @param {string} memberDid
    */
-  function handleRemoveMember(memberDid) {
+  async function handleRemoveMember(memberDid) {
     if (!activeGroup) return;
     setError('');
     try {
-      const updated = removeGroupMember(activeGroup, memberDid);
+      const updated = await removeGroupMember(activeGroup, memberDid);
       setGroups((prev) => prev.map((g) => (g.groupId === updated.groupId ? updated : g)));
       setFeedback(`Removed ${memberDid}. Ratcheted to epoch ${updated.epoch}`);
     } catch (err) {
@@ -114,11 +124,11 @@ export function GroupsScreen({
   /**
    * Sends an encrypted application message to the active group.
    */
-  function handleSendGroupMessage() {
+  async function handleSendGroupMessage() {
     if (!activeGroup || !groupMsgText.trim()) return;
     setError('');
     try {
-      appendGroupMessage(activeGroup, {
+      await appendGroupMessage(activeGroup, {
         senderDid: currentUserDid,
         text: groupMsgText.trim(),
       });
