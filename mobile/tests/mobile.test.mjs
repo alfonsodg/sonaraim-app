@@ -19,13 +19,11 @@ import {
 } from '../src/cardValidator.js';
 
 describe('Mobile Config Resolver', () => {
-  it('resolves safe defaults when environment variables are omitted', () => {
-    const config = resolveMobileConfig({});
-    assert.equal(config.appApiUrl, 'http://localhost:3000');
-    assert.equal(config.nodeApiUrl, 'http://localhost:8080');
-    assert.equal(config.livekitUrl, 'wss://livekit.sonaraim.internal');
-    assert.equal(config.domainSalt, 'sonaraim-mobile-v1');
-    assert.equal(config.requestTimeoutMs, 8000);
+  it('fails fast when required environment variables are omitted', () => {
+    assert.throws(
+      () => resolveMobileConfig({}),
+      /Missing required mobile configuration: EXPO_PUBLIC_APP_API_URL/
+    );
   });
 
   it('overrides URLs and strips trailing slashes dynamically', () => {
@@ -33,19 +31,40 @@ describe('Mobile Config Resolver', () => {
       EXPO_PUBLIC_APP_API_URL: 'https://app.sonaraim.org///',
       EXPO_PUBLIC_NODE_API_URL: 'https://relay.sonaraim.org/',
       EXPO_PUBLIC_LIVEKIT_URL: 'wss://livekit.sonaraim.org/',
+      EXPO_PUBLIC_LIVEKIT_MEET_URL: 'https://meet.sonaraim.org/custom/',
+      EXPO_PUBLIC_CDN_BASE_URL: 'https://cdn.sonaraim.org///',
       EXPO_PUBLIC_DOMAIN_SALT: 'custom-salt-v2',
       EXPO_PUBLIC_REQUEST_TIMEOUT_MS: '5000',
     });
     assert.equal(custom.appApiUrl, 'https://app.sonaraim.org');
     assert.equal(custom.nodeApiUrl, 'https://relay.sonaraim.org');
     assert.equal(custom.livekitUrl, 'wss://livekit.sonaraim.org');
+    assert.equal(custom.livekitMeetUrl, 'https://meet.sonaraim.org/custom');
+    assert.equal(custom.cdnBaseUrl, 'https://cdn.sonaraim.org');
     assert.equal(custom.domainSalt, 'custom-salt-v2');
     assert.equal(custom.requestTimeoutMs, 5000);
   });
 
-  it('exports default mobileConfig instance', () => {
-    assert.ok(mobileConfig);
-    assert.ok(typeof mobileConfig.appApiUrl === 'string');
+  it('exports default mobileConfig proxy that resolves from process.env', () => {
+    const prev = {
+      EXPO_PUBLIC_APP_API_URL: process.env.EXPO_PUBLIC_APP_API_URL,
+      EXPO_PUBLIC_NODE_API_URL: process.env.EXPO_PUBLIC_NODE_API_URL,
+      EXPO_PUBLIC_LIVEKIT_URL: process.env.EXPO_PUBLIC_LIVEKIT_URL,
+      EXPO_PUBLIC_DOMAIN_SALT: process.env.EXPO_PUBLIC_DOMAIN_SALT,
+    };
+    process.env.EXPO_PUBLIC_APP_API_URL = 'https://app.test.example.com';
+    process.env.EXPO_PUBLIC_NODE_API_URL = 'https://node.test.example.com';
+    process.env.EXPO_PUBLIC_LIVEKIT_URL = 'wss://lk.test.example.com';
+    process.env.EXPO_PUBLIC_DOMAIN_SALT = 'test-salt-v1';
+    try {
+      assert.ok(mobileConfig);
+      assert.equal(mobileConfig.appApiUrl, 'https://app.test.example.com');
+    } finally {
+      for (const [k, v] of Object.entries(prev)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 });
 
@@ -205,7 +224,10 @@ describe('Mobile API Client with Mocked Fetch', () => {
       };
     };
 
-    const client = createApiClient({ nodeApiUrl: 'http://test-node:8080' }, { fetch: mockFetch });
+    const client = createApiClient(
+      { nodeApiUrl: 'http://test-node:8080', domainSalt: 'test-salt' },
+      { fetch: mockFetch }
+    );
     const res = await client.blindMatchPsi(['hash-1', 'hash-2']);
     assert.deepEqual(res.matched_hashes, ['hash-1']);
   });

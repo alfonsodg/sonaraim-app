@@ -21,6 +21,30 @@ describe('LiveKit External Call Launcher', () => {
     );
   });
 
+  it('uses EXPO_PUBLIC_LIVEKIT_MEET_URL when meetBaseUrl is omitted and fails when unconfigured', () => {
+    const prev = process.env.EXPO_PUBLIC_LIVEKIT_MEET_URL;
+    process.env.EXPO_PUBLIC_LIVEKIT_MEET_URL = 'https://meet.custom.example.com/room/';
+    try {
+      const url = buildLiveKitJoinUrl({
+        serverUrl: 'wss://livekit.example.com',
+        token: 'jwt.tok.sig',
+      });
+      assert.equal(
+        url,
+        'https://meet.custom.example.com/room?liveKitUrl=wss%3A%2F%2Flivekit.example.com&token=jwt.tok.sig'
+      );
+    } finally {
+      if (prev === undefined) delete process.env.EXPO_PUBLIC_LIVEKIT_MEET_URL;
+      else process.env.EXPO_PUBLIC_LIVEKIT_MEET_URL = prev;
+    }
+
+    delete process.env.EXPO_PUBLIC_LIVEKIT_MEET_URL;
+    assert.throws(
+      () => buildLiveKitJoinUrl({ serverUrl: 'wss://lk.example.com', token: 'abc' }),
+      /Missing required mobile configuration: livekitMeetUrl/
+    );
+  });
+
   it('rejects empty serverUrl or token', () => {
     assert.throws(
       () => buildLiveKitJoinUrl({ serverUrl: '', token: 'abc' }),

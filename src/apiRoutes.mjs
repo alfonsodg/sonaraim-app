@@ -162,11 +162,8 @@ export async function handleDiscoveryAndCallRoutes(req, res, url, ctx) {
       const descriptor = createLiveKitRoomToken({
         roomName: String(body.roomName || 'sonaraim-default-room'),
         participantDid: String(body.participantDid || 'did:sonaraim:caller'),
-        livekitUrl:
-          ctx.livekitUrl ||
-          process.env.PUBLIC_LIVEKIT_URL ||
-          'wss://livekit.sonaraim.internal',
-        signingKey: ctx.sessionSecret,
+        livekitUrl: ctx.livekitUrl || process.env.PUBLIC_LIVEKIT_URL,
+        signingKey: ctx.livekitApiSecret || process.env.LIVEKIT_API_SECRET || ctx.sessionSecret,
       });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(descriptor));

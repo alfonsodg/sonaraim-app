@@ -51,22 +51,22 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 describe('Issue #13: E2EE Multimedia Crypto & Catalog Helpers', () => {
-  it('encrypts and decrypts media buffer using AES-256-GCM roundtrip', () => {
-    const rawData = Buffer.from('Confidential voice note / image bytes', 'utf8');
-    const encrypted = encryptMediaBuffer(rawData);
+  it('encrypts and decrypts media buffer using AES-256-GCM roundtrip', async () => {
+    const rawData = new TextEncoder().encode('Confidential voice note / image bytes');
+    const encrypted = await encryptMediaBuffer(rawData);
 
-    assert.ok(encrypted.ciphertext instanceof Uint8Array || Buffer.isBuffer(encrypted.ciphertext));
+    assert.ok(encrypted.ciphertext instanceof Uint8Array);
     assert.equal(encrypted.keyHex.length, 64);
     assert.equal(encrypted.ivHex.length, 24);
     assert.equal(encrypted.authTagHex.length, 32);
 
-    const decrypted = decryptMediaBuffer({
+    const decrypted = await decryptMediaBuffer({
       ciphertext: encrypted.ciphertext,
       authTagHex: encrypted.authTagHex,
       keyHex: encrypted.keyHex,
       ivHex: encrypted.ivHex,
     });
-    assert.equal(decrypted.toString('utf8'), 'Confidential voice note / image bytes');
+    assert.equal(new TextDecoder().decode(decrypted), 'Confidential voice note / image bytes');
   });
 
   it('builds canonical media pointer and requests presigned upload', async () => {
@@ -101,19 +101,27 @@ describe('Issue #13: E2EE Multimedia Crypto & Catalog Helpers', () => {
     assert.equal(res.presigned_url, 'https://s3.sonaraim.org/upload-ticket');
   });
 
-  it('provides emoji, sticker, and filtered GIF catalogs', () => {
-    const emojis = getEmojiCatalog();
-    assert.ok(emojis.includes('👍') && emojis.includes('❤️'));
-    const stickers = getStickerCatalog();
-    assert.ok(stickers.length >= 2 && stickers[0].url);
-    const gifs = searchGifs('thumbs');
-    assert.ok(gifs.length >= 1 && /thumbs/i.test(gifs[0].tags.join(' ')));
+  it('provides emoji, sticker, and filtered GIF catalogs using EXPO_PUBLIC_CDN_BASE_URL', () => {
+    const prevCdn = process.env.EXPO_PUBLIC_CDN_BASE_URL;
+    process.env.EXPO_PUBLIC_CDN_BASE_URL = 'https://assets.example.com/media/';
+    try {
+      const emojis = getEmojiCatalog();
+      assert.ok(emojis.includes('👍') && emojis.includes('❤️'));
+      const stickers = getStickerCatalog();
+      assert.ok(stickers.length >= 2 && stickers[0].url.startsWith('https://assets.example.com/media/'));
+      const gifs = searchGifs('thumbs');
+      assert.ok(gifs.length >= 1 && /thumbs/i.test(gifs[0].tags.join(' ')));
+      assert.ok(gifs[0].url.startsWith('https://assets.example.com/media/'));
+    } finally {
+      if (prevCdn === undefined) delete process.env.EXPO_PUBLIC_CDN_BASE_URL;
+      else process.env.EXPO_PUBLIC_CDN_BASE_URL = prevCdn;
+    }
   });
 });
 
 describe('Issue #14: E2EE Group Chats & Ratchet Management', () => {
-  it('creates group with epoch 0 and ratchets key when adding members', () => {
-    const group = createGroup({
+  it('creates group with epoch 0 and ratchets key when adding members', async () => {
+    const group = await createGroup({
       groupId: 'grp-crypto-team',
       creatorDid: 'did:sonaraim:alice',
       title: 'Crypto Team',
@@ -122,28 +130,28 @@ describe('Issue #14: E2EE Group Chats & Ratchet Management', () => {
     assert.deepEqual(group.members, ['did:sonaraim:alice']);
     assert.ok(group.currentEpochKeyHex && group.transcriptDigestHex);
 
-    const g1 = addGroupMember(group, 'did:sonaraim:bob');
+    const g1 = await addGroupMember(group, 'did:sonaraim:bob');
     assert.equal(g1.epoch, 1);
     assert.ok(g1.members.includes('did:sonaraim:bob'));
     assert.notEqual(g1.currentEpochKeyHex, group.currentEpochKeyHex);
     assert.notEqual(g1.transcriptDigestHex, group.transcriptDigestHex);
   });
 
-  it('ratchets key on member removal and restricts decryption of future epochs', () => {
-    const g0 = createGroup({ groupId: 'grp-sec', creatorDid: 'did:sonaraim:alice' });
-    const g1 = addGroupMember(g0, 'did:sonaraim:bob');
-    const g2 = addGroupMember(g1, 'did:sonaraim:carol');
-    const g3 = removeGroupMember(g2, 'did:sonaraim:bob');
+  it('ratchets key on member removal and restricts decryption of future epochs', async () => {
+    const g0 = await createGroup({ groupId: 'grp-sec', creatorDid: 'did:sonaraim:alice' });
+    const g1 = await addGroupMember(g0, 'did:sonaraim:bob');
+    const g2 = await addGroupMember(g1, 'did:sonaraim:carol');
+    const g3 = await removeGroupMember(g2, 'did:sonaraim:bob');
     assert.equal(g3.epoch, 3);
     assert.ok(!g3.members.includes('did:sonaraim:bob'));
 
-    const msg = appendGroupMessage(g3, {
+    const msg = await appendGroupMessage(g3, {
       senderDid: 'did:sonaraim:carol',
       text: 'Secret project discussion',
     });
     assert.equal(msg.epoch, 3);
-    assert.equal(decryptGroupMessage(g3, msg, 'did:sonaraim:alice'), 'Secret project discussion');
-    assert.throws(
+    assert.equal(await decryptGroupMessage(g3, msg, 'did:sonaraim:alice'), 'Secret project discussion');
+    await assert.rejects(
       () => decryptGroupMessage(g3, msg, 'did:sonaraim:bob'),
       /not authorized to decrypt epoch 3/i
     );
@@ -218,7 +226,7 @@ describe('Issue #16: 24h Status/Stories & Silent Push Registration', () => {
   });
 
   it('derives blind push wake token and registers with node relay', async () => {
-    const token = deriveBlindPushToken('mailbox-123', 'env-456', 1700000000);
+    const token = await deriveBlindPushToken('mailbox-123', 'env-456', 1700000000);
     assert.match(token, /^wake_[0-9a-f]{32}$/);
 
     const mockFetch = async () => ({
