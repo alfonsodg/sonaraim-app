@@ -9,9 +9,9 @@ import {
   getEmojiCatalog,
   getStickerCatalog,
   searchGifs,
-  createMediaPointer,
-  encryptMediaBuffer,
 } from '../mediaCrypto.js';
+import { apiClient } from '../apiClient.js';
+import { processMediaAttachment } from '../mediaComposerLogic.js';
 import { mediaComposerStyles as styles } from '../styles/mediaComposerStyles.js';
 
 /**
@@ -34,6 +34,7 @@ export function MediaComposer({
   const [text, setText] = useState('');
   const [activeTray, setActiveTray] = useState(null); // 'emoji' | 'sticker' | 'gif' | null
   const [gifQuery, setGifQuery] = useState('');
+  const [attachError, setAttachError] = useState('');
 
   const emojis = getEmojiCatalog();
   const stickers = getStickerCatalog();
@@ -62,39 +63,39 @@ export function MediaComposer({
   }
 
   /**
-   * Encrypts a mock multimedia attachment and dispatches it.
+   * Captures/picks native media, encrypts it with AES-256-GCM, uploads via presigned URL,
+   * and dispatches the resulting encrypted media pointer.
    *
    * @param {'image' | 'video' | 'audio'} kind - Attachment type.
    */
-  function handleAttachMedia(kind) {
-    const rawPayload = Buffer.from(`simulated-${kind}-${Date.now()}`, 'utf8');
-    const encrypted = encryptMediaBuffer(rawPayload);
-    const mimeMap = {
-      image: 'image/jpeg',
-      video: 'video/mp4',
-      audio: 'audio/m4a',
-    };
-    const pointer = createMediaPointer({
-      mediaUrl: `https://s3.sonaraim.org/blobs/${kind}-${Date.now()}`,
-      sha256: encrypted.sha256Ciphertext,
-      mimeType: mimeMap[kind],
-      keyHex: encrypted.keyHex,
-      ivHex: encrypted.ivHex,
-      authTagHex: encrypted.authTagHex,
-      fileName: `attachment-${Date.now()}.${kind === 'image' ? 'jpg' : kind === 'video' ? 'mp4' : 'm4a'}`,
-      sizeBytes: rawPayload.length,
-    });
+  async function handleAttachMedia(kind) {
+    if (disabled) return;
+    setAttachError('');
+    try {
+      const result = await processMediaAttachment({
+        kind,
+        nodeApiUrl: apiClient.config.nodeApiUrl,
+      });
+      if (result.cancelled || !result.mediaPointer) {
+        return;
+      }
 
-    onSend({
-      text: text.trim() || `[Encrypted ${kind.toUpperCase()}]`,
-      mediaPointer: pointer,
-    });
-    setText('');
-    setActiveTray(null);
+      onSend({
+        text: text.trim() || `[Encrypted ${kind.toUpperCase()}]`,
+        mediaPointer: result.mediaPointer,
+      });
+      setText('');
+      setActiveTray(null);
+    } catch (err) {
+      setAttachError(err?.message || `Failed to attach ${kind}`);
+    }
   }
 
   return (
     <View style={styles.container}>
+      {attachError ? (
+        <Text style={{ color: '#ef4444', fontSize: 12, marginBottom: 4 }}>{attachError}</Text>
+      ) : null}
       {activeTray ? (
         <View style={styles.pickerTray}>
           <View style={styles.trayHeader}>
