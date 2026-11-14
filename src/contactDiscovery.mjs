@@ -115,17 +115,25 @@ export async function discoverContactsViaNode(
 export function createLiveKitRoomToken({
   roomName,
   participantDid,
-  livekitUrl = process.env.PUBLIC_LIVEKIT_URL || 'wss://livekit.sonaraim.internal',
-  signingKey = process.env.LIVEKIT_API_SECRET || 'sonaraim-livekit-ephemeral-secret',
+  livekitUrl = process.env.PUBLIC_LIVEKIT_URL,
+  signingKey = process.env.LIVEKIT_API_SECRET,
   ttlSec = 3600,
 }) {
   const cleanRoom = String(roomName ?? '').trim();
   const cleanDid = String(participantDid ?? '').trim();
+  const cleanLivekitUrl = String(livekitUrl ?? '').trim();
+  const cleanSigningKey = String(signingKey ?? '').trim();
   if (!cleanRoom) {
     throw new Error('roomName is required');
   }
   if (!cleanDid) {
     throw new Error('participantDid is required');
+  }
+  if (!cleanLivekitUrl) {
+    throw new Error('PUBLIC_LIVEKIT_URL is required');
+  }
+  if (!cleanSigningKey) {
+    throw new Error('LIVEKIT_API_SECRET is required');
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
@@ -144,14 +152,14 @@ export function createLiveKitRoomToken({
     }),
     'utf8'
   ).toString('base64url');
-  const sig = createHmac('sha256', String(signingKey))
+  const sig = createHmac('sha256', cleanSigningKey)
     .update(`${headerB64}.${payloadB64}`)
     .digest('base64url');
 
   return {
     roomName: cleanRoom,
     participantDid: cleanDid,
-    livekitUrl: String(livekitUrl).trim(),
+    livekitUrl: cleanLivekitUrl,
     token: `${headerB64}.${payloadB64}.${sig}`,
     expiresAt: expSec * 1000,
   };

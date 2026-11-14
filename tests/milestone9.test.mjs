@@ -214,6 +214,7 @@ test('Issue #6: fetchMailboxEnvelopes drains queued envelopes from Node API and 
   const { baseUrl, close } = await startAppTestServer({
     nodeApiBaseUrl: mockNodeUrl,
     appHttpPort: 0,
+    requireAuth: false,
   });
 
   try {

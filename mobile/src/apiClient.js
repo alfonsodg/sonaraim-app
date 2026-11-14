@@ -4,7 +4,7 @@
  * companion device pairing, Dual Inbox messaging, LiveKit call tokens, and PSI contact matching.
  */
 
-import { resolveMobileConfig } from './config.js';
+import { resolveMobileConfig, requireMobileEnvUrl } from './config.js';
 
 /**
  * Normalizes an international phone number to strict E.164 format.
@@ -36,7 +36,22 @@ export function normalizeE164(rawPhone) {
  * @param {{ fetch?: typeof fetch }} [dependencies] - Injected fetch implementation (useful for tests).
  */
 export function createApiClient(customConfig = {}, dependencies = {}) {
-  const config = { ...resolveMobileConfig(), ...customConfig };
+  const safeCustom = customConfig && typeof customConfig === 'object' ? customConfig : {};
+  const config = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop in safeCustom && safeCustom[prop] !== undefined) {
+          return safeCustom[prop];
+        }
+        if (prop === 'requestTimeoutMs') {
+          const parsed = Number.parseInt(process.env.EXPO_PUBLIC_REQUEST_TIMEOUT_MS || '8000', 10);
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : 8000;
+        }
+        return resolveMobileConfig()[prop];
+      },
+    }
+  );
   const fetchFn = dependencies.fetch || globalThis.fetch;
 
   if (typeof fetchFn !== 'function') {
@@ -225,14 +240,17 @@ export function createApiClient(customConfig = {}, dependencies = {}) {
 export function buildLiveKitJoinUrl({
   serverUrl,
   token,
-  meetBaseUrl = 'https://meet.livekit.io/custom',
+  meetBaseUrl,
 } = {}) {
   const cleanServer = String(serverUrl || '').trim();
   const cleanToken = String(token || '').trim();
   if (!cleanServer || !cleanToken) {
     throw new Error('serverUrl and token are required');
   }
-  const base = String(meetBaseUrl || 'https://meet.livekit.io/custom').replace(/\/+$/, '');
+  const resolvedBase =
+    String(meetBaseUrl || '').trim() ||
+    requireMobileEnvUrl(['EXPO_PUBLIC_LIVEKIT_MEET_URL', 'LIVEKIT_MEET_URL'], 'livekitMeetUrl');
+  const base = resolvedBase.replace(/\/+$/, '');
   const query = new URLSearchParams({
     liveKitUrl: cleanServer,
     token: cleanToken,

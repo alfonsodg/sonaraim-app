@@ -3,7 +3,7 @@
  * Handles 86400s TTL expiry filtering and zero-metadata silent wake-up tokens.
  */
 
-import crypto from 'node:crypto';
+import { sha256Hex } from './cryptoUtils.js';
 
 /**
  * 24 hours in seconds.
@@ -71,11 +71,11 @@ export function filterActiveStatuses(statusList, currentTimestamp = Date.now()) 
  * @param {string} mailboxId - Target recipient mailbox or DID.
  * @param {string} envelopeId - Target envelope identifier.
  * @param {number} epochSecs - Creation epoch timestamp in seconds.
- * @returns {string} Formatted blind wake token.
+ * @returns {Promise<string>} Formatted blind wake token.
  */
-export function deriveBlindPushToken(mailboxId, envelopeId, epochSecs) {
+export async function deriveBlindPushToken(mailboxId, envelopeId, epochSecs) {
   const payload = `sonaraim:wake:v1|${mailboxId}|${envelopeId}|${epochSecs}`;
-  const digest = crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
+  const digest = await sha256Hex(payload);
   return `wake_${digest.slice(0, 32)}`;
 }
 

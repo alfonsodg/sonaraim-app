@@ -267,6 +267,7 @@ test('Issue #9: decode live Node items[].payload_hex into Dual Inbox streams and
   const { baseUrl, close } = await startAppTestServer({
     nodeApiBaseUrl: mockNodeUrl,
     appHttpPort: 0,
+    requireAuth: false,
   });
 
   try {
@@ -351,6 +352,7 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
   const { baseUrl, close } = await startAppTestServer({
     nodeApiBaseUrl: 'http://127.0.0.1:8090',
     appHttpPort: 0,
+    requireAuth: false,
   });
 
   try {
@@ -451,6 +453,7 @@ test('fetchMailboxEnvelopes prefers payload.items over string-only payload.envel
     const { baseUrl, close } = await startAppTestServer({
       nodeApiBaseUrl: `http://127.0.0.1:${mockNode.address().port}`,
       appHttpPort: 0,
+      requireAuth: false,
     });
     try {
       const inbox = await httpRequest(`${baseUrl}/inbox?mailboxId=did:sonaraim:alice`);
@@ -461,5 +464,44 @@ test('fetchMailboxEnvelopes prefers payload.items over string-only payload.envel
     }
   } finally {
     await new Promise((r) => mockNode.close(() => r()));
+  }
+});
+
+test('Issue #22 & #23: fail closed on /inbox by default (401) and fail fast on missing LiveKit config', async () => {
+  const prevUrl = process.env.PUBLIC_LIVEKIT_URL;
+  const prevSecret = process.env.LIVEKIT_API_SECRET;
+  delete process.env.PUBLIC_LIVEKIT_URL;
+  delete process.env.LIVEKIT_API_SECRET;
+
+  try {
+    assert.throws(
+      () => createLiveKitRoomToken({ roomName: 'r1', participantDid: 'did:sonaraim:alice' }),
+      /PUBLIC_LIVEKIT_URL is required/
+    );
+    assert.throws(
+      () =>
+        createLiveKitRoomToken({
+          roomName: 'r1',
+          participantDid: 'did:sonaraim:alice',
+          livekitUrl: 'wss://livekit.example.com',
+        }),
+      /LIVEKIT_API_SECRET is required/
+    );
+  } finally {
+    if (prevUrl !== undefined) process.env.PUBLIC_LIVEKIT_URL = prevUrl;
+    if (prevSecret !== undefined) process.env.LIVEKIT_API_SECRET = prevSecret;
+  }
+
+  const { baseUrl, close } = await startAppTestServer({
+    nodeApiBaseUrl: 'http://127.0.0.1:8090',
+    appHttpPort: 0,
+  });
+  try {
+    const inboxRes = await httpRequest(`${baseUrl}/inbox`);
+    assert.equal(inboxRes.status, 401);
+    const body = JSON.parse(inboxRes.body);
+    assert.equal(body.error, 'unauthorized');
+  } finally {
+    await close();
   }
 });
