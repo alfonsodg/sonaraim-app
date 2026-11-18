@@ -1,29 +1,11 @@
-/**
- * @fileoverview WebAuthn Passkey challenge generation, real assertion verification,
- * and HttpOnly HMAC-signed session cookie management for Sonaraim Client App.
- *
- * Verification model (documented MVD for issue #25):
- * - Challenge bound to origin + RP-ID; the client echoes the challenge inside
- *   `clientDataJSON`, which must parse with `type === 'webauthn.get'`.
- * - COSE-style Ed25519 signature check via WebCrypto (`node:crypto` webcrypto,
- *   stable since Node 22.13): `verify(pubkey, authData || sha256(clientDataJSON))`.
- * - Counter/replay protection: one-time challenge consumption plus strict
- *   monotonic `signCount` tracking per `credentialId` in `credentialStore`.
- * - Credential public keys are bound on first use (TOFU): a known
- *   `credentialId` presenting a different key, a different user, or a
- *   non-monotonic counter is rejected as a cloned/replayed authenticator.
- */
 
 import crypto from 'node:crypto';
+import { mintSessionCookie } from './sessionCookie.mjs';
 
 import {
   decodeB64urlStrict,
-  extractEd25519KeyFromCose,
-  parseAttestationObject,
   parseAuthenticatorData,
 } from './webauthnCose.mjs';
-
-const SESSION_COOKIE_NAME = 'sonaraim_session';
 
 const DEFAULT_RP_ID = 'localhost';
 const DEFAULT_ORIGIN = 'http://localhost';
@@ -82,87 +64,6 @@ export function createPasskeyChallenge(userDid, challengeStore, options) {
     challengeStore.set(challengeId, record);
   }
   return { challengeId, challenge, userDid: cleanDid, expiresAt, rpId, origin };
-}
-
-/**
- * Registers a WebAuthn credential from a `webauthn.create` ceremony, binding the
- * extracted COSE Ed25519 public key to `credentialId` + `userDid` in
- * `credentialStore`. Accepts only `fmt: 'none'` self-attestation.
- *
- * @param {object} params - Registration inputs.
- * @param {string} params.userDid - Sovereign `did:sonaraim:` identifier.
- * @param {string} params.credentialId - Opaque credential identifier (base64url).
- * @param {string} params.attestationObject - CBOR attestation object (base64url).
- * @param {string} params.clientDataJSON - JSON client data (base64url, `type === 'webauthn.create'`).
- * @param {string} params.challengeB64 - Pending registration challenge to match.
- * @param {string} [params.expectedRpId] - RP-ID the attestation auth data must hash to.
- * @param {string} [params.expectedOrigin] - Origin the creation clientData must echo.
- * @param {Map} params.credentialStore - Per-credential registry.
- * @returns {{ credentialId: string, userDid: string, publicKeyRaw: string }}
- */
-export function registerPasskeyCredential({
-  userDid,
-  credentialId,
-  attestationObject,
-  clientDataJSON,
-  challengeB64,
-  expectedRpId,
-  expectedOrigin,
-  credentialStore,
-}) {
-  const cleanDid = String(userDid ?? '').trim();
-  if (!cleanDid.startsWith('did:sonaraim:')) {
-    throw new Error('userDid must start with did:sonaraim:');
-  }
-  const cleanCredentialId = String(credentialId ?? '').trim();
-  if (!cleanCredentialId) {
-    throw new Error('Invalid Passkey registration: missing credentialId');
-  }
-  if (!(credentialStore instanceof Map)) {
-    throw new Error('Valid credentialStore Map is required');
-  }
-  if (credentialStore.has(cleanCredentialId)) {
-    throw new Error('Invalid Passkey registration: credential already registered');
-  }
-  const clientBytes = decodeB64urlStrict(clientDataJSON, 'clientDataJSON');
-  let clientData;
-  try {
-    clientData = JSON.parse(clientBytes.toString('utf8'));
-  } catch {
-    throw new Error('Invalid Passkey registration: clientDataJSON is not JSON');
-  }
-  if (clientData?.type !== 'webauthn.create') {
-    throw new Error('Invalid Passkey registration: unexpected clientData type');
-  }
-  if (String(clientData?.challenge ?? '') !== String(challengeB64 ?? '')) {
-    throw new Error('Invalid Passkey registration: challenge mismatch');
-  }
-  const { authData } = parseAttestationObject(attestationObject);
-  const parsed = parseAuthenticatorData(authData);
-  if (!parsed.userPresent) {
-    throw new Error('Invalid Passkey registration: user-presence flag not set');
-  }
-  if (!parsed.credentialIdB64 || !parsed.coseKey) {
-    throw new Error('Invalid Passkey registration: missing attested credential');
-  }
-  if (expectedRpId) {
-    const expectedHash = Buffer.from(
-      crypto.createHash('sha256').update(String(expectedRpId), 'utf8').digest()
-    );
-    if (!crypto.timingSafeEqual(parsed.rpIdHash, expectedHash)) {
-      throw new Error('Invalid Passkey registration: RP-ID mismatch');
-    }
-  }
-  if (expectedOrigin && String(clientData?.origin ?? '') !== String(expectedOrigin)) {
-    throw new Error('Invalid Passkey registration: origin mismatch');
-  }
-  if (parsed.credentialIdB64 !== cleanCredentialId) {
-    throw new Error('Invalid Passkey registration: credentialId mismatch');
-  }
-  const pubBytes = extractEd25519KeyFromCose(parsed.coseKey);
-  const publicKeyRaw = pubBytes.toString('base64url');
-  credentialStore.set(cleanCredentialId, { publicKeyRaw, lastCounter: 0, userDid: cleanDid });
-  return { credentialId: cleanCredentialId, userDid: cleanDid, publicKeyRaw };
 }
 
 /**
@@ -324,70 +225,13 @@ export function verifyPasskeyAssertionAndIssueSession({
     });
   }
 
-  const secret = String(sessionSecret ?? '').trim();
-  if (!secret) {
-    throw new Error('sessionSecret is required');
-  }
-
-  const expiresAt = Date.now() + Number(sessionTtlSec) * 1000;
-  const payloadB64 = Buffer.from(
-    JSON.stringify({ sub: String(userDid ?? '').trim(), exp: expiresAt, jti: crypto.randomUUID() }),
-    'utf8'
-  ).toString('base64url');
-  const mac = crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url');
-  const sessionToken = `${payloadB64}.${mac}`;
-  const cookieHeader = `${SESSION_COOKIE_NAME}=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Number(sessionTtlSec)}`;
+  const minted = mintSessionCookie(String(userDid ?? '').trim(), sessionSecret, sessionTtlSec);
 
   return {
-    sessionToken,
-    cookieHeader,
+    sessionToken: minted.sessionToken,
+    cookieHeader: minted.cookieHeader,
     userDid: String(userDid ?? '').trim(),
-    expiresAt,
+    expiresAt: minted.expiresAt,
   };
 }
 
-/**
- * Validates the `sonaraim_session` cookie from an HTTP Cookie header or Set-Cookie string.
- *
- * @param {string | undefined} rawCookieHeader - Raw `Cookie` or `Set-Cookie` header string.
- * @param {string} sessionSecret - Server HMAC secret.
- * @returns {{ valid: boolean, userDid?: string, reason?: string }}
- */
-export function verifyAppSessionCookie(rawCookieHeader, sessionSecret) {
-  const header = String(rawCookieHeader ?? '').trim();
-  if (!header) {
-    return { valid: false, reason: 'MISSING_COOKIE' };
-  }
-  const match = header.match(/(?:^|;\s*)sonaraim_session=([^;]+)/);
-  if (!match) {
-    return { valid: false, reason: 'MISSING_SESSION_TOKEN' };
-  }
-  const token = match[1].trim();
-  const parts = token.split('.');
-  if (parts.length !== 2) {
-    return { valid: false, reason: 'MALFORMED_TOKEN' };
-  }
-
-  const [payloadB64, providedMac] = parts;
-  const secret = String(sessionSecret ?? '').trim();
-  if (!secret) {
-    return { valid: false, reason: 'MISSING_SECRET' };
-  }
-
-  const expectedMac = crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url');
-  const a = Buffer.from(providedMac);
-  const b = Buffer.from(expectedMac);
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return { valid: false, reason: 'INVALID_SIGNATURE' };
-  }
-
-  try {
-    const claims = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
-    if (typeof claims.exp !== 'number' || Date.now() > claims.exp) {
-      return { valid: false, reason: 'SESSION_EXPIRED' };
-    }
-    return { valid: true, userDid: String(claims.sub) };
-  } catch {
-    return { valid: false, reason: 'INVALID_PAYLOAD' };
-  }
-}

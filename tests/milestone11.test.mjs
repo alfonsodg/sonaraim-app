@@ -365,13 +365,70 @@ test('Issue #9: decode live Node items[].payload_hex into Dual Inbox streams and
     nodeApiBaseUrl: mockNodeUrl,
     appHttpPort: 0,
     requireAuth: false,
+    sessionSecret: 'issue9-sender-secret-0123456789abcdef',
   });
 
+  /**
+   * Issues a session cookie for the sender via register + assert.
+   */
+  async function cookieFor(userDid) {
+    const rcRes = await httpRequest(`${baseUrl}/auth/passkey/register/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid, rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
+    });
+    const rc = JSON.parse(rcRes.body);
+    const key = await generateEd25519FixtureKey();
+    const credId = Buffer.from(`cred9-${userDid}-${Date.now()}`).toString('base64url');
+    const authData = await buildAttestationAuthData({
+      rpId: rc.rpId,
+      credentialIdB64: credId,
+      coseKeyBytes: buildCoseFixtureKey(key.publicKeyRawB64),
+    });
+    const regRes = await httpRequest(`${baseUrl}/auth/passkey/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeId: rc.challengeId,
+        userDid,
+        credentialId: credId,
+        attestationObject: buildAttestationObject(authData),
+        clientDataJSON: buildRegistrationClientData(rc.challenge, rc.origin),
+      }),
+    });
+    assert.equal(regRes.status, 201);
+    const chRes = await httpRequest(`${baseUrl}/auth/passkey/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid, rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
+    });
+    const ch = JSON.parse(chRes.body);
+    const assertion = await buildWebauthnAssertion({
+      privateKey: key.privateKey,
+      publicKeyRawB64: key.publicKeyRawB64,
+      rpId: ch.rpId,
+      origin: ch.origin,
+      challengeB64: ch.challenge,
+      counter: 1,
+    });
+    assertion.credentialId = credId;
+    const vRes = await httpRequest(`${baseUrl}/auth/passkey/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeId: ch.challengeId, userDid, ...assertion }),
+    });
+    assert.equal(vRes.status, 200);
+    const setCookie = vRes.headers['set-cookie'];
+    return String(Array.isArray(setCookie) ? setCookie[0] : setCookie).split(';')[0];
+  }
+
+  const aliceCookie = await cookieFor('did:sonaraim:alice');
+
   try {
-    // 1. Send P2P message via POST /inbox/messages (JSON)
+    // 1. Send P2P message via POST /inbox/messages (JSON, session-bound sender)
     const sendRes = await httpRequest(`${baseUrl}/inbox/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Cookie: aliceCookie },
       body: JSON.stringify({
         senderDid: 'did:sonaraim:alice',
         recipientDid: 'did:sonaraim:bob',
@@ -445,12 +502,76 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
   assert.equal(manifest.start_url, '/inbox');
   assert.equal(manifest.display, 'standalone');
 
-  // 4. HTTP integration tests
+  // 4. HTTP integration tests (pairing routes require a session since #26)
   const { baseUrl, close } = await startAppTestServer({
     nodeApiBaseUrl: 'http://127.0.0.1:8090',
     appHttpPort: 0,
     requireAuth: false,
+    sessionSecret: 'issue10-pairing-secret-0123456789abcdef',
   });
+
+  /**
+   * Issues a real session cookie via register + assert ceremony.
+   */
+  async function issueCookie(userDid) {
+    const rcRes = await httpRequest(`${baseUrl}/auth/passkey/register/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid, rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
+    });
+    assert.equal(rcRes.status, 200);
+    const rc = JSON.parse(rcRes.body);
+    const key = await generateEd25519FixtureKey();
+    const authData = await buildAttestationAuthData({
+      rpId: rc.rpId,
+      credentialIdB64: Buffer.from(`cred10-${Date.now()}`).toString('base64url'),
+      coseKeyBytes: buildCoseFixtureKey(key.publicKeyRawB64),
+    });
+    const credId = Buffer.from(`cred10-${Date.now()}`).toString('base64url');
+    const authData2 = await buildAttestationAuthData({
+      rpId: rc.rpId,
+      credentialIdB64: credId,
+      coseKeyBytes: buildCoseFixtureKey(key.publicKeyRawB64),
+    });
+    void authData;
+    const regRes = await httpRequest(`${baseUrl}/auth/passkey/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeId: rc.challengeId,
+        userDid,
+        credentialId: credId,
+        attestationObject: buildAttestationObject(authData2),
+        clientDataJSON: buildRegistrationClientData(rc.challenge, rc.origin),
+      }),
+    });
+    assert.equal(regRes.status, 201);
+    const chRes = await httpRequest(`${baseUrl}/auth/passkey/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid, rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
+    });
+    const ch = JSON.parse(chRes.body);
+    const assertion = await buildWebauthnAssertion({
+      privateKey: key.privateKey,
+      publicKeyRawB64: key.publicKeyRawB64,
+      rpId: ch.rpId,
+      origin: ch.origin,
+      challengeB64: ch.challenge,
+      counter: 1,
+    });
+    assertion.credentialId = credId;
+    const vRes = await httpRequest(`${baseUrl}/auth/passkey/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeId: ch.challengeId, userDid, ...assertion }),
+    });
+    assert.equal(vRes.status, 200);
+    const setCookie = vRes.headers['set-cookie'];
+    return String(Array.isArray(setCookie) ? setCookie[0] : setCookie).split(';')[0];
+  }
+
+  const ownerCookie = await issueCookie('did:sonaraim:+51999888777');
 
   try {
     // Phone registration route
@@ -472,10 +593,17 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
     });
     assert.equal(regBad.status, 400);
 
-    // Companion device pairing: create code
-    const pairCreate = await httpRequest(`${baseUrl}/auth/devices/pair`, {
+    // Companion device pairing: create code (session-bound since #26)
+    const unauthPair = await httpRequest(`${baseUrl}/auth/devices/pair`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid: 'did:sonaraim:+51999888777' }),
+    });
+    assert.equal(unauthPair.status, 401);
+
+    const pairCreate = await httpRequest(`${baseUrl}/auth/devices/pair`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
       body: JSON.stringify({ userDid: 'did:sonaraim:+51999888777' }),
     });
     assert.equal(pairCreate.status, 200);
@@ -486,7 +614,7 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
     // Companion device pairing: redeem code
     const pairClaim = await httpRequest(`${baseUrl}/auth/devices/pair`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
       body: JSON.stringify({ pairingCode: pairData.pairingCode }),
     });
     assert.equal(pairClaim.status, 200);
@@ -497,7 +625,7 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
     // Companion device pairing: invalid code
     const pairBad = await httpRequest(`${baseUrl}/auth/devices/pair`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Cookie: ownerCookie },
       body: JSON.stringify({ pairingCode: '000000' }),
     });
     assert.equal(pairBad.status, 400);

@@ -51,14 +51,18 @@ export {
   buildPwaManifest,
 } from './phonePairing.mjs';
 
+export { createPairingAttemptLimiter } from './pairingRateLimit.mjs';
+
 export {
   resolveRpId,
   resolveOrigin,
   createPasskeyChallenge,
-  registerPasskeyCredential,
   verifyPasskeyAssertionAndIssueSession,
-  verifyAppSessionCookie,
 } from './passkeySession.mjs';
+
+export { mintSessionCookie, verifyAppSessionCookie } from './sessionCookie.mjs';
+
+export { registerPasskeyCredential } from './passkeyRegistration.mjs';
 
 export {
   decodeB64urlStrict,

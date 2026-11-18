@@ -164,8 +164,10 @@ export function createApiClient(customConfig = {}, dependencies = {}) {
 
     /**
      * Sends an encrypted P2P message envelope via `POST /inbox/messages`.
+     * The server binds the sender to the session identity; `mediaPointer`
+     * travels alongside `text` (issue #27).
      *
-     * @param {{ senderDid: string, recipientDid: string, text: string }} payload
+     * @param {{ senderDid: string, recipientDid: string, text: string, mediaPointer?: any }} payload
      * @returns {Promise<{ status: string, envelopeId: string, recipientDid: string }>}
      */
     async sendP2pMessage(payload) {
@@ -175,6 +177,7 @@ export function createApiClient(customConfig = {}, dependencies = {}) {
           senderDid: payload.senderDid,
           recipientDid: payload.recipientDid,
           text: payload.text,
+          ...(payload.mediaPointer ? { mediaPointer: payload.mediaPointer } : {}),
         }),
       });
     },

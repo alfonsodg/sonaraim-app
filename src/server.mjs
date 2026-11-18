@@ -8,14 +8,17 @@ import { renderInboxView } from './ui/inboxView.mjs';
 import { renderPasskeyLoginView } from './ui/passkeyLoginView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
 import { fetchMailboxEnvelopes } from './nodeClient.mjs';
-import { verifyAppSessionCookie } from './passkeySession.mjs';
+import { verifyAppSessionCookie } from './sessionCookie.mjs';
 import { handlePhoneAndDeviceRoutes } from './phonePairing.mjs';
+import { createPairingAttemptLimiter } from './pairingRateLimit.mjs';
 import { handleClipAndConsentRoutes } from './clipRoutes.mjs';
 import {
-  handlePasskeyAuthRoutes,
   handleDiscoveryAndCallRoutes,
   handleInboxMessageRoutes,
 } from './apiRoutes.mjs';
+import {
+  handlePasskeyAuthRoutes,
+} from './passkeyRoutes.mjs';
 
 /**
  * Creates the HTTP request handler wired to the client app configuration.
@@ -43,6 +46,8 @@ export function createAppRequestHandler(config = {}) {
   const registrationStore = new Map();
   const credentialStore = new Map();
   const pairingStore = new Map();
+  const pairingAttemptStore = new Map();
+  const pairingAttemptLimiter = createPairingAttemptLimiter();
 
   const router = new DualInboxRouter();
   const defaultMerchantDid = 'did:web:clinic.example.com';
@@ -111,7 +116,7 @@ export function createAppRequestHandler(config = {}) {
       return;
     }
 
-    if (await handleInboxMessageRoutes(req, res, url, { nodeApiBaseUrl: config.nodeApiBaseUrl })) {
+    if (await handleInboxMessageRoutes(req, res, url, { nodeApiBaseUrl: config.nodeApiBaseUrl, sessionSecret })) {
       return;
     }
 
@@ -119,6 +124,9 @@ export function createAppRequestHandler(config = {}) {
       await handlePhoneAndDeviceRoutes(req, res, url, {
         nodeApiBaseUrl: config.nodeApiBaseUrl,
         pairingStore,
+        pairingAttemptStore,
+        pairingAttemptLimiter,
+        sessionSecret,
       })
     ) {
       return;
