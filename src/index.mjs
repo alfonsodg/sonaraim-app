@@ -27,6 +27,7 @@ export {
 } from './zkVault.mjs';
 
 export { renderInboxView } from './ui/inboxView.mjs';
+export { renderPasskeyLoginView } from './ui/passkeyLoginView.mjs';
 export { renderInstantClipView } from './ui/instantClipView.mjs';
 export { escapeHtml, renderAppShell } from './ui/htmlUtils.mjs';
 
@@ -51,10 +52,21 @@ export {
 } from './phonePairing.mjs';
 
 export {
+  resolveRpId,
+  resolveOrigin,
   createPasskeyChallenge,
+  registerPasskeyCredential,
   verifyPasskeyAssertionAndIssueSession,
   verifyAppSessionCookie,
 } from './passkeySession.mjs';
+
+export {
+  decodeB64urlStrict,
+  decodeCborItem,
+  parseAttestationObject,
+  parseAuthenticatorData,
+  extractEd25519KeyFromCose,
+} from './webauthnCose.mjs';
 
 export {
   createAppRequestHandler,

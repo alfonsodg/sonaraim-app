@@ -23,10 +23,66 @@ export function escapeHtml(value) {
  * @param {object} params - Shell rendering options.
  * @param {string} params.title - Document and header title.
  * @param {string} params.contentHtml - Pre-escaped inner HTML for the `<main>` landmark.
+ * @param {{ challengeEndpoint?: string, verifyEndpoint?: string }} [params.passkey] - Passkey endpoints enabling the `navigator.credentials.get()` client flow.
  * @returns {string} Complete HTML5 document.
  */
-export function renderAppShell({ title, contentHtml }) {
+export function renderAppShell({ title, contentHtml, passkey }) {
   const safeTitle = escapeHtml(title);
+  const passkeyScript =
+    passkey && passkey.challengeEndpoint && passkey.verifyEndpoint
+      ? `<script>
+(function () {
+  async function b64ToBytes(b64) {
+    const bin = atob(b64.replace(/-/g, '+').replace(/_/g, '/'));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  function bytesToB64(bytes) {
+    let bin = '';
+    const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    for (let i = 0; i < view.length; i += 1) bin += String.fromCharCode(view[i]);
+    return btoa(bin).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+  }
+  async function sonaraimPasskeyLogin(userDid) {
+    const challengeRes = await fetch(${JSON.stringify(passkey.challengeEndpoint)}, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid }),
+    });
+    if (!challengeRes.ok) throw new Error('Passkey challenge failed');
+    const issued = await challengeRes.json();
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        challenge: await b64ToBytes(issued.challenge),
+        rpId: issued.rpId,
+        timeout: 60000,
+        userVerification: 'preferred',
+      },
+    });
+    const response = credential.response;
+    const verifyRes = await fetch(${JSON.stringify(passkey.verifyEndpoint)}, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeId: issued.challengeId,
+        userDid,
+        credentialId: credential.id,
+        authenticatorData: bytesToB64(new Uint8Array(response.authenticatorData)),
+        clientDataJSON: bytesToB64(new Uint8Array(response.clientDataJSON)),
+        assertionSignature: bytesToB64(new Uint8Array(response.signature)),
+        publicKeyRaw: bytesToB64(new Uint8Array(response.authenticatorData.slice(0, 0))),
+        rpId: issued.rpId,
+        origin: window.location.origin,
+      }),
+    });
+    if (!verifyRes.ok) throw new Error('Passkey verification failed');
+    window.location.assign('/inbox');
+  }
+  window.sonaraimPasskeyLogin = sonaraimPasskeyLogin;
+})();
+</script>`
+      : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -53,6 +109,7 @@ export function renderAppShell({ title, contentHtml }) {
 <body>
   <header><h1>${safeTitle}</h1></header>
   <main>${contentHtml}</main>
+  ${passkeyScript}
 </body>
 </html>`;
 }

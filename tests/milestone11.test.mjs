@@ -9,13 +9,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import crypto from 'node:crypto';
+
+import {
+  buildAttestationAuthData,
+  buildAttestationObject,
+  buildCoseFixtureKey,
+  buildRegistrationClientData,
+  buildWebauthnAssertion,
+  generateEd25519FixtureKey,
+  registerFixtureCredential,
+} from './webauthnFixtures.mjs';
 
 import {
   startAppTestServer,
   createPasskeyChallenge,
+  registerPasskeyCredential,
   verifyPasskeyAssertionAndIssueSession,
   verifyAppSessionCookie,
+  resolveRpId,
+  resolveOrigin,
   blindContactIdentifier,
   discoverContactsViaNode,
   createLiveKitRoomToken,
@@ -78,17 +90,42 @@ function httpRequest(url, options = {}) {
 test('Issue #7: Passkey challenge generation, assertion verification, session cookie, and protected /inbox gate', async () => {
   const secret = 'test-session-hmac-secret-0123456789';
   const store = new Map();
-  const ch = createPasskeyChallenge('did:sonaraim:alice', store);
+  const origins = { rpId: 'app.sonaraim.test', origin: 'https://app.sonaraim.test' };
+  const ch = createPasskeyChallenge('did:sonaraim:alice', store, origins);
   assert.ok(ch.challengeId);
   assert.ok(ch.challenge);
+  assert.equal(ch.rpId, origins.rpId);
+  assert.equal(ch.origin, origins.origin);
+  assert.equal(resolveRpId(''), process.env.SONARAIM_RP_ID || 'localhost');
+  assert.ok(resolveOrigin('').length > 0);
+
+  const credentialStore = new Map();
+  const registered = await registerFixtureCredential({
+    userDid: 'did:sonaraim:alice',
+    rpId: origins.rpId,
+    origin: origins.origin,
+    credentialStore,
+    registerFn: registerPasskeyCredential,
+  });
+  const assertion = await buildWebauthnAssertion({
+    privateKey: registered.privateKey,
+    publicKeyRawB64: registered.publicKeyRaw,
+    rpId: origins.rpId,
+    origin: origins.origin,
+    challengeB64: ch.challenge,
+    counter: 1,
+  });
+  assertion.credentialId = registered.credentialId;
 
   const session = verifyPasskeyAssertionAndIssueSession({
     challengeId: ch.challengeId,
-    challenge: ch.challenge,
     userDid: 'did:sonaraim:alice',
-    assertionSignature: 'valid_passkey_sig',
+    credentialStore,
     challengeStore: store,
     sessionSecret: secret,
+    rpId: origins.rpId,
+    origin: origins.origin,
+    ...assertion,
   });
   assert.equal(session.userDid, 'did:sonaraim:alice');
   assert.match(session.cookieHeader, /HttpOnly/i);
@@ -111,22 +148,82 @@ test('Issue #7: Passkey challenge generation, assertion verification, session co
     const challengeRes = await httpRequest(`${baseUrl}/auth/passkey/challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userDid: 'did:sonaraim:alice' }),
+      body: JSON.stringify({ userDid: 'did:sonaraim:alice', rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
     });
     assert.equal(challengeRes.status, 200);
     const challengeData = JSON.parse(challengeRes.body);
+
+    const regChallengeRes = await httpRequest(`${baseUrl}/auth/passkey/register/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid: 'did:sonaraim:alice', rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
+    });
+    assert.equal(regChallengeRes.status, 200);
+    const regChallenge = JSON.parse(regChallengeRes.body);
+    const httpKey = await generateEd25519FixtureKey();
+    const httpRegClientData = buildRegistrationClientData(regChallenge.challenge, regChallenge.origin);
+    const httpCoseKey = buildCoseFixtureKey(httpKey.publicKeyRawB64);
+    const httpCredId = Buffer.from(`http-cred-${Date.now()}`).toString('base64url');
+    const httpAuthData = await buildAttestationAuthData({
+      rpId: regChallenge.rpId,
+      credentialIdB64: httpCredId,
+      coseKeyBytes: httpCoseKey,
+    });
+    const regRes = await httpRequest(`${baseUrl}/auth/passkey/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeId: regChallenge.challengeId,
+        userDid: 'did:sonaraim:alice',
+        credentialId: httpCredId,
+        attestationObject: buildAttestationObject(httpAuthData),
+        clientDataJSON: httpRegClientData,
+      }),
+    });
+    assert.equal(regRes.status, 201);
+
+    const forgedRes = await httpRequest(`${baseUrl}/auth/passkey/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        challengeId: challengeData.challengeId,
+        userDid: 'did:sonaraim:alice',
+        rpId: challengeData.rpId,
+        origin: challengeData.origin,
+        credentialId: httpCredId,
+        authenticatorData: Buffer.alloc(37).toString('base64url'),
+        clientDataJSON: Buffer.from('{}').toString('base64url'),
+        assertionSignature: Buffer.alloc(64, 9).toString('base64url'),
+      }),
+    });
+    assert.equal(forgedRes.status, 401);
+
+    const challengeRes2 = await httpRequest(`${baseUrl}/auth/passkey/challenge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userDid: 'did:sonaraim:alice', rpId: '127.0.0.1', origin: 'http://127.0.0.1' }),
+    });
+    assert.equal(challengeRes2.status, 200);
+    const challengeData2 = JSON.parse(challengeRes2.body);
+    const httpAssertion2 = await buildWebauthnAssertion({
+      privateKey: httpKey.privateKey,
+      publicKeyRawB64: httpKey.publicKeyRawB64,
+      rpId: challengeData2.rpId,
+      origin: challengeData2.origin,
+      challengeB64: challengeData2.challenge,
+      counter: 7,
+    });
+    httpAssertion2.credentialId = httpCredId;
 
     const verifyRes = await httpRequest(`${baseUrl}/auth/passkey/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        challengeId: challengeData.challengeId,
-        challenge: challengeData.challenge,
+        challengeId: challengeData2.challengeId,
         userDid: 'did:sonaraim:alice',
-        assertionSignature: crypto
-          .createHmac('sha256', challengeData.challenge)
-          .update('did:sonaraim:alice')
-          .digest('base64url'),
+        rpId: challengeData2.rpId,
+        origin: challengeData2.origin,
+        ...httpAssertion2,
       }),
     });
     assert.equal(verifyRes.status, 200);
