@@ -3,7 +3,7 @@
  * Wires bottom navigation tabs (`Inbox`, `Groups`, `Status`, `Calls`, `Pairing`) and identity state.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,9 @@ import { GroupsScreen } from './screens/GroupsScreen.js';
 import { StatusScreen } from './screens/StatusScreen.js';
 import { CallsScreen } from './screens/CallsScreen.js';
 import { ActivationScreen } from './screens/ActivationScreen.js';
+import { resolveNextTab } from './tabState.js';
+import { registerPushToken } from './statusStore.js';
+import { apiClient } from './apiClient.js';
 
 /**
  * Available navigation tabs.
@@ -34,16 +37,55 @@ export const TABS = Object.freeze([
  *
  * @param {{
  *   initialTab?: 'inbox' | 'groups' | 'status' | 'calls' | 'activation',
- *   initialDid?: string
+ *   initialDid?: string,
+ *   pushToken?: { platform?: string, deviceToken?: string } | null,
+ *   registerPushTokenFn?: typeof registerPushToken
  * }} [props]
  * @returns {React.ReactElement} AppShell component.
  */
 export function AppShell({
   initialTab = 'inbox',
   initialDid = 'did:sonaraim:mobile-user',
+  pushToken = null,
+  registerPushTokenFn = registerPushToken,
 } = {}) {
   const [activeTab, setActiveTab] = useState(initialTab);
   const [userDid, setUserDid] = useState(initialDid);
+  const [pushRegistered, setPushRegistered] = useState(false);
+
+  useEffect(() => {
+    setActiveTab((prev) => resolveNextTab(prev, initialTab));
+  }, [initialTab]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const deviceToken =
+      pushToken && typeof pushToken.deviceToken === 'string'
+        ? pushToken.deviceToken.trim()
+        : '';
+    if (!deviceToken || !userDid) {
+      return undefined;
+    }
+    registerPushTokenFn({
+      nodeApiUrl: apiClient.config.nodeApiUrl,
+      userDid,
+      pushToken: deviceToken,
+      platform: 'expo',
+    })
+      .then(() => {
+        if (!cancelled) {
+          setPushRegistered(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPushRegistered(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pushToken, userDid, registerPushTokenFn]);
 
   /**
    * Callback invoked when a new phone identity is activated.

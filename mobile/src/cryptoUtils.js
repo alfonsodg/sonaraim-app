@@ -8,6 +8,48 @@ const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 /**
+ * Returns the global readiness gate installed by the entrypoint crypto
+ * bootstrap when it exists. Business logic must never import the native
+ * install module directly (hygiene rule, issue #19): the entrypoint registers
+ * a single shared promise here, and background callers await it before
+ * touching `crypto.subtle`.
+ *
+ * @returns {Promise<unknown> | null} Pending install promise, or null.
+ */
+export function getCryptoReadyGate() {
+  return globalThis.__sonaraimCryptoReady ?? null;
+}
+
+/**
+ * Sets the global readiness gate. Called once by the entrypoint install flow.
+ *
+ * @param {Promise<unknown> | null} gate - Install promise or null to clear.
+ * @returns {void}
+ */
+export function setCryptoReadyGate(gate) {
+  if (gate === null || gate === undefined) {
+    delete globalThis.__sonaraimCryptoReady;
+    return;
+  }
+  globalThis.__sonaraimCryptoReady = gate;
+}
+
+/**
+ * Awaits the entrypoint crypto install when one is in flight. Resolves
+ * immediately when no gate is registered (e.g. Node where WebCrypto is
+ * native). Throws loudly when the registered gate rejects (no installable
+ * module on Hermes), so callers never proceed on a broken `crypto.subtle`.
+ *
+ * @returns {Promise<void>}
+ */
+export async function awaitCryptoReady() {
+  const gate = getCryptoReadyGate();
+  if (gate && typeof gate.then === 'function') {
+    await gate;
+  }
+}
+
+/**
  * Returns the active WebCrypto instance from `globalThis.crypto`.
  *
  * @returns {Crypto} Standard WebCrypto object.

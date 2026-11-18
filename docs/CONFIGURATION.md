@@ -119,5 +119,5 @@ npm run build:ios        # eas build --platform ios --profile production
 
 ### `/inbox` & `/inbox/messages`
 
-- **`GET /inbox`**: Renders the Dual Inbox view (HTML for browsers, JSON when requested via `Accept: application/json`).
-- **`POST /inbox/messages`**: Dispatches an encrypted P2P message envelope to the upstream Node relay.
+- **`GET /inbox`**: Renders the Dual Inbox view (HTML for browsers, JSON when requested via `Accept: application/json`). With `requireAuth=false` (dev only) this route skips the session-cookie check.
+- **`POST /inbox/messages`**: Dispatches an encrypted P2P message envelope to the upstream Node relay. **Always requires a valid app session cookie**, even when `requireAuth=false`: the sender DID is bound to the session identity, an explicit mismatched `senderDid` is rejected with `403`, and missing/invalid sessions get `401`. There is no unauthenticated send path.
