@@ -4,6 +4,9 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { renderInboxView } from './ui/inboxView.mjs';
 import { renderPasskeyLoginView } from './ui/passkeyLoginView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
@@ -50,6 +53,12 @@ export function createAppRequestHandler(config = {}) {
   const pairingAttemptLimiter = createPairingAttemptLimiter();
 
   const router = new DualInboxRouter();
+  const publicDir = path.dirname(fileURLToPath(import.meta.url, '')) + '/../public';
+  const staticAssets = new Map([
+    ['/icon-192.png', { file: 'icons/icon-192.png', type: 'image/png' }],
+    ['/icon-512.png', { file: 'icons/icon-512.png', type: 'image/png' }],
+    ['/sw.js', { file: 'sw.js', type: 'application/javascript; charset=utf-8' }],
+  ]);
   const defaultMerchantDid = 'did:web:clinic.example.com';
   router.grantConsent({
     tokenId: 'ct-clinic-default',
@@ -68,6 +77,24 @@ export function createAppRequestHandler(config = {}) {
   return async (req, res) => {
     counters.httpRequestsTotal += 1;
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+
+    const staticAsset = req.method === 'GET' ? staticAssets.get(url.pathname) : null;
+    if (staticAsset) {
+      try {
+        const filePath = path.join(publicDir, staticAsset.file);
+        const data = await fs.promises.readFile(filePath);
+        res.writeHead(200, {
+          'Content-Type': staticAsset.type,
+          'Cache-Control': 'public, max-age=86400',
+          'Content-Length': data.length,
+        });
+        res.end(data);
+      } catch {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'not_found' }));
+      }
+      return;
+    }
 
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

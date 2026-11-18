@@ -640,7 +640,7 @@ test('Issue #10: E.164 phone activation, companion device 6-digit/QR pairing, an
     // GET /inbox rendering linked phone and companion device section
     const inboxRes = await httpRequest(`${baseUrl}/inbox?mailboxId=did:sonaraim:+51999888777`);
     assert.equal(inboxRes.status, 200);
-    assert.match(inboxRes.body, /<link rel="icon" href="data:," \/>/);
+    assert.match(inboxRes.body, /<link rel="icon"[^>]*\/icon-192\.png/);
     assert.match(inboxRes.body, /<link rel="manifest" href="\/manifest\.webmanifest" \/>/);
     assert.match(inboxRes.body, /Linked Phone:\s*<code>\+51999888777<\/code>/);
     assert.match(inboxRes.body, /Link Companion Device \(6-digit code\)/);

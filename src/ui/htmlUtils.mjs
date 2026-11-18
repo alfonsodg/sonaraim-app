@@ -88,8 +88,10 @@ export function renderAppShell({ title, contentHtml, passkey }) {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="data:," />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
+  <meta name="theme-color" content="#090d16" />
   <title>${safeTitle}</title>
   <style>
     :root { --bg:#090d16; --card:#121826; --text:#f3f4f6; --accent:#22d3ee; }
@@ -110,6 +112,13 @@ export function renderAppShell({ title, contentHtml, passkey }) {
   <header><h1>${safeTitle}</h1></header>
   <main>${contentHtml}</main>
   ${passkeyScript}
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>`;
 }
