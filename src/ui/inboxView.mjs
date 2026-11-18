@@ -10,7 +10,7 @@ import { escapeHtml, renderAppShell } from './htmlUtils.mjs';
  * card action forms, 1-tap consent revocation, and 6-digit companion device pairing controls.
  *
  * @param {object} [state] - Inbox snapshot.
- * @param {Array<{from: string, preview: string}>} [state.personalMessages]
+ * @param {Array<{from: string, preview: string, mediaPointer?: Record<string, any>}>} [state.personalMessages]
  * @param {Array<{tenantDid: string, title: string, actions?: string[], clipToken?: string}>} [state.serviceCards]
  * @param {{tenantDid: string, revokedAt: string}} [state.revocationReceipt] - Optional consent revocation receipt.
  * @param {string} [state.linkedPhone] - Optional registered E.164 phone number.
@@ -32,10 +32,13 @@ export function renderInboxView({
     : '';
 
   const personalRows = personalMessages
-    .map(
-      (msg) =>
-        `<li><strong>${escapeHtml(msg.from)}</strong>: <span>${escapeHtml(msg.preview)}</span></li>`
-    )
+    .map((msg) => {
+      const mediaBadge =
+        msg.mediaPointer && typeof msg.mediaPointer === 'object'
+          ? `<div><small>📎 encrypted attachment: <code>${escapeHtml(msg.mediaPointer.mimeType ?? 'media')}</code> · <code>${escapeHtml(msg.mediaPointer.fileName ?? msg.mediaPointer.sha256 ?? '')}</code> · <a href="${escapeHtml(msg.mediaPointer.mediaUrl ?? '#')}">fetch blob</a></small></div>`
+          : '';
+      return `<li><strong>${escapeHtml(msg.from)}</strong>: <span>${escapeHtml(msg.preview)}</span>${mediaBadge}</li>`;
+    })
     .join('');
 
   const sendFormHtml = `
