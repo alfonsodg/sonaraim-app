@@ -27,6 +27,25 @@ Consequences accepted by the owner:
 - `newArchEnabled: true` (verify against Expo SDK 51 during the EAS build).
 - Platform floors: iOS 16.4+, Android `minSdkVersion` 24.
 
+## Notifications (issue #31)
+
+`App.js` mounts `setupNotificationHandler()` (`src/notificationHandler.js`)
+on startup:
+
+- Foreground presentation (`shouldShowBanner/List/Badge`, no sound) plus
+  `addNotificationReceivedListener` / `addNotificationResponseReceivedListener`
+  for background taps.
+- OS permission flow via `acquireDevicePushToken()` (bridge); denial resolves
+  to a `null` token without breaking listeners.
+- `sonaraim://inbox|groups|status|calls|pairing?...` deep links route to the
+  matching tab (`AppShell initialTab`).
+
+Explicit deferral (owner sign-off pending in the issue): end-to-end delivery
+(relay wake-up → APNs/FCM → device banner) is **not** wired here — the node
+push registry is a counter + formatted payload with no dispatcher, and no
+sandbox device/APNs-FCM credentials exist in this repo. The handler +
+deep-link contract above is the integration point; delivery infra is roadmap.
+
 ## EAS build (config ready, not executed here)
 
 `app.json` / `eas.json` are build-ready (channels, profiles, plugin). No
