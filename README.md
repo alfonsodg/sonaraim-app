@@ -4,7 +4,7 @@
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Stack: React Native + Expo](https://img.shields.io/badge/Stack-React%20Native%20%2B%20Expo%2051-61DAFB.svg?logo=react&logoColor=black)](mobile/package.json)
-[![Calling: LiveKit WebRTC SFU](https://img.shields.io/badge/Calling-LiveKit%20WebRTC%20SFU-blue.svg)](mobile/src/callControlsLogic.js)
+[![Calling: LiveKit Meet fallback (external app)](https://img.shields.io/badge/Calling-LiveKit%20Meet%20fallback-yellow.svg)](mobile/README.md)
 [![Isolation: Dual Inbox Architecture](https://img.shields.io/badge/Isolation-Dual%20Inbox%20Architecture-purple.svg)](src/dualInbox.mjs)
 [![Identity: Passkey WebAuthn PRF](https://img.shields.io/badge/Identity-Passkey%20WebAuthn%20PRF-orange.svg)](src/zkVault.mjs)
 
@@ -20,7 +20,7 @@
 - **Zero-HTML Declarative Card Engine (`src/cardRenderer.mjs`, `mobile/src/cardValidator.js`)**: Eliminates WebView, HTML, CSS, and script injection surfaces by parsing cryptographically signed (`Ed25519`) declarative JSON schemas into native view trees and emitting signed user action intents.
 - **Passkey WebAuthn PRF Zero-Knowledge Vault (`src/zkVault.mjs`)**: Derives 256-bit symmetric keys from hardware-backed Passkey WebAuthn `prf` extension outputs via domain-separated HKDF, encrypting MLS ratchet state and history snapshots with authenticated `AES-256-GCM`.
 - **E.164 Phone Identity & Companion Device Pairing (`src/phonePairing.mjs`)**: Supports WhatsApp-like onboarding via international phone numbers (`+...`), HMAC-blinded identity pseudonymization, and 6-digit / QR pairing sessions (`sonaraim://pair?...`) linking desktop or web companion clients.
-- **LiveKit Encrypted Calling (`src/contactDiscovery.mjs`, `mobile/src/screens/CallsScreen.js`, `mobile/src/callControlsLogic.js`)**: Real-time end-to-end encrypted voice and video room token issuance via `/api/calls/token` and in-app WebRTC call controls.
+- **LiveKit Encrypted Calling (`src/contactDiscovery.mjs`, `mobile/src/screens/CallsScreen.js`, `mobile/src/callControlsLogic.js`)**: Encrypted room token issuance via `/api/calls/token`, opened in the external LiveKit Meet app (honest fallback; no in-app WebRTC engine embedded — see `mobile/README.md` and issue #29).
 - **E2EE Multimedia Crypto & Catalogs (`mobile/src/mediaCrypto.js`)**: Client-side AES-256-GCM encryption and decryption for media attachments, canonical media pointer generation, presigned S3/MinIO upload requests, emoji and sticker catalogs, and filtered GIF search.
 - **MLS Group Chats & Ratchet Management (`mobile/src/groupManager.js`)**: Ratcheted group messaging with epoch progression, forward secrecy, and key re-generation when adding or removing group members.
 - **WhatsApp-Parity Chat Interactions (`mobile/src/chatFeatures.js`)**: Emoji reactions toggling with aggregated counts, quote replies referencing original messages, delivery/read receipts (`sent` -> `delivered` -> `read`), and ephemeral typing indicator signals.
@@ -86,7 +86,7 @@ The following ASCII diagram illustrates the segregation between personal and ver
 |  |  - Passkey WebAuthn PRF Zero-Knowledge Vault (zkVault.mjs: HKDF -> AES-GCM) |  |
 |  |  - MLS Group Ratchet Manager with forward secrecy (groupManager.js)        |  |
 |  |  - Client-Side AES-256-GCM Media Crypto & S3 Presigned Upload (mediaCrypto)|  |
-|  |  - LiveKit WebRTC E2EE Voice & Video Calling Rooms (callControlsLogic.js)   |  |
+|  |  - LiveKit Meet fallback: token issuance + external app (callControlsLogic.js UI state) |  |
 |  |  - WhatsApp Parity: Reactions, Quotes, Receipts, 24h Status (chatFeatures)  |  |
 |  +-------------------------------------+---------------------------------------+  |
 |                                        |                                          |

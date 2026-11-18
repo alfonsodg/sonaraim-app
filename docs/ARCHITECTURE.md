@@ -7,7 +7,7 @@
 `sonaraim-app` is the client runtime for the SonarAIM messaging ecosystem, providing two complementary deployment artifacts:
 
 1. **Core Web / PWA Server (`src/`)**: A minimal Node.js ESM server powering Progressive Web App (PWA) and Instant Web / App Clip experiences with Passkey WebAuthn gates, Dual Inbox routing, and upstream Node relay integrations.
-2. **React Native (Expo) Mobile Client (`mobile/`)**: A cross-platform mobile application for iOS and Android delivering native phone identity activation, 6-digit companion device pairing, Dual Inbox messaging, Zero-HTML Declarative Card action execution, and encrypted LiveKit voice/video calls.
+2. **React Native (Expo) Mobile Client (`mobile/`)**: A cross-platform mobile application for iOS and Android delivering native phone identity activation, 6-digit companion device pairing, Dual Inbox messaging, Zero-HTML Declarative Card action execution, and encrypted LiveKit Meet fallback calling (external app; no embedded WebRTC engine — see `mobile/README.md`).
 
 ### Core Invariants
 
@@ -86,5 +86,5 @@
 - **`mobile/src/cardValidator.js`**: Client-side Zero-HTML validator enforcing schema invariants, allowed component types, and allowed actions before rendering.
 - **`mobile/src/screens/ActivationScreen.js`**: E.164 phone number onboarding, DID derivation, and 6-digit companion device pairing UI.
 - **`mobile/src/screens/InboxScreen.js`**: Dual Inbox tab view segregating Personal P2P messages from Verified Services cards, complete with message composition and action triggers.
-- **`mobile/src/screens/CallsScreen.js`**: LiveKit room launcher connecting to `/api/calls/token` for encrypted calls.
+- **`mobile/src/screens/CallsScreen.js`**: LiveKit room launcher connecting to `/api/calls/token`, opening the external Meet app (fallback; see `mobile/README.md`).
 - **`mobile/src/AppShell.js`**: Root tab navigator coordinating active screens and identity state.
