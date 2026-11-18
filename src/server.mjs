@@ -5,6 +5,7 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { renderInboxView } from './ui/inboxView.mjs';
+import { renderPasskeyLoginView } from './ui/passkeyLoginView.mjs';
 import { DualInboxRouter } from './dualInbox.mjs';
 import { fetchMailboxEnvelopes } from './nodeClient.mjs';
 import { verifyAppSessionCookie } from './passkeySession.mjs';
@@ -39,6 +40,8 @@ export function createAppRequestHandler(config = {}) {
     safeConfig.requireAuth === false || process.env.SONARAIM_ALLOW_DEV_NOAUTH === 'true'
   );
   const challengeStore = new Map();
+  const registrationStore = new Map();
+  const credentialStore = new Map();
   const pairingStore = new Map();
 
   const router = new DualInboxRouter();
@@ -94,7 +97,7 @@ export function createAppRequestHandler(config = {}) {
       return;
     }
 
-    if (await handlePasskeyAuthRoutes(req, res, url, { challengeStore, sessionSecret })) {
+    if (await handlePasskeyAuthRoutes(req, res, url, { challengeStore, registrationStore, credentialStore, sessionSecret })) {
       return;
     }
 
@@ -128,6 +131,12 @@ export function createAppRequestHandler(config = {}) {
       const synced = await fetchMailboxEnvelopes(config.nodeApiBaseUrl, mailboxId);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(synced));
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/login') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(renderPasskeyLoginView({}));
       return;
     }
 
