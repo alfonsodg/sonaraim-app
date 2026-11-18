@@ -6,6 +6,7 @@ WORKDIR /workspace
 COPY package.json ./
 COPY src/ ./src/
 COPY tests/ ./tests/
+COPY public/ ./public/
 
 # Verify unit and integration test suite during build
 RUN npm test
