@@ -5,11 +5,14 @@
  * permission flow + `sonaraim://` deep links), then mounts AppShell.
  */
 
-import { installCryptoPolyfill, loadQuickCryptoModule } from './cryptoPolyfill.js';
+import { installCryptoPolyfill, loadQuickCryptoModule, ensureCryptoReady } from './cryptoPolyfill.js';
 
-loadQuickCryptoModule().then((quickCryptoModule) => {
-  installCryptoPolyfill({ installModule: quickCryptoModule });
-});
+loadQuickCryptoModule()
+  .then((quickCryptoModule) => {
+    installCryptoPolyfill({ installModule: quickCryptoModule });
+    return ensureCryptoReady({ loadModuleFn: async () => quickCryptoModule });
+  })
+  .catch(() => {});
 
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
