@@ -21,8 +21,23 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Run Tests
+      - name: Run Tests (web)
         run: npm test
+
+      - name: Run Tests (mobile)
+        run: cd mobile && npm install && npm test
+
+      - name: Report test summary
+        if: always()
+        run: |
+          {
+            echo "## Test suites (sonaraim-app #30)";
+            echo "";
+            echo "| Suite | Command | Status |";
+            echo "| --- | --- | --- |";
+            echo "| web | \`npm test\` | see 'Run Tests (web)' step |";
+            echo "| mobile | \`cd mobile && npm install && npm test\` | see 'Run Tests (mobile)' step |";
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
