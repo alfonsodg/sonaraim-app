@@ -53,7 +53,7 @@ export function createAppRequestHandler(config = {}) {
   const pairingAttemptLimiter = createPairingAttemptLimiter();
 
   const router = new DualInboxRouter();
-  const publicDir = path.dirname(fileURLToPath(import.meta.url, '')) + '/../public';
+  const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
   const staticAssets = new Map([
     ['/icon-192.png', { file: 'icons/icon-192.png', type: 'image/png' }],
     ['/icon-512.png', { file: 'icons/icon-512.png', type: 'image/png' }],
@@ -95,6 +95,7 @@ export function createAppRequestHandler(config = {}) {
       }
       return;
     }
+
 
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

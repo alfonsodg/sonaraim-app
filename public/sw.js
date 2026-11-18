@@ -2,9 +2,9 @@
  * @fileoverview Sonaraim PWA service worker (issue #28).
  * Offline shell strategy:
  * - App shell + icons: cache-first (pre-cached at install, versioned).
- * - API/relay (`/api/`, `/v1/`, `/inbox/messages`): network-first with cache
- *   fallback for GETs; non-GET requests never served from cache.
+ * - API/relay (`/api/`, `/v1/` GETs): network-first with cache fallback.
  * - Navigations: network-first, fallback to cached `/inbox` shell offline.
+ * Non-GET requests are never served from cache.
  */
 
 const SW_VERSION = 'sonaraim-sw-v1';
@@ -33,6 +33,9 @@ self.addEventListener('activate', (event) => {
 
 /**
  * Decides whether a request targets a cacheable GET API route.
+ *
+ * @param {Request} request - Incoming fetch request.
+ * @returns {boolean} True for GET requests under /api/ or /v1/.
  */
 function isApiGet(request) {
   if (request.method !== 'GET') {
@@ -52,9 +55,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (request.mode === 'navigate') {
-    event.respondWith(
-      fetch(request).catch(() => caches.match('/inbox', { ignoreSearch: true }))
-    );
+    event.respondWith(fetch(request).catch(() => caches.match('/inbox', { ignoreSearch: true })));
     return;
   }
   if (isApiGet(request)) {
