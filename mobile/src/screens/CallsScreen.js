@@ -1,7 +1,8 @@
 /**
  * @fileoverview LiveKit Encrypted Calling Screen for Sonaraim Mobile.
- * Fetches cryptographic call room tokens, provides embedded WebRTC in-app controls,
- * and launches external LiveKit Meet sessions.
+ * Fetches cryptographic call room tokens and launches external LiveKit Meet
+ * sessions as an honest fallback (issue #29: no in-app WebRTC engine is
+ * embedded; CallControls drives local mic/camera/speaker UI state only).
  */
 
 import React, { useState } from 'react';

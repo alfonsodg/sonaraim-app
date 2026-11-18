@@ -1,7 +1,14 @@
 /**
  * @fileoverview Root entrypoint for Sonaraim React Native (Expo) Mobile Application.
- * Configures application-wide status bar and mounts the main navigation AppShell.
+ * Installs the vetted WebCrypto polyfill ONCE (issue #29, owner Option C) before
+ * mounting the navigation AppShell, then configures the status bar.
  */
+
+import { installCryptoPolyfill, loadQuickCryptoModule } from './cryptoPolyfill.js';
+
+loadQuickCryptoModule().then((quickCryptoModule) => {
+  installCryptoPolyfill({ installModule: quickCryptoModule });
+});
 
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';

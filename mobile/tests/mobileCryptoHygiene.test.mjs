@@ -1,6 +1,10 @@
 /**
  * @fileoverview Static hygiene tests for Sonaraim Mobile (`mobile/src/`).
- * Ensures Metro/Hermes compatibility: zero `node:*` imports and zero bare `Buffer` globals.
+ * Ensures Metro/Hermes compatibility: zero `node:*` imports and zero bare
+ * `Buffer` globals in business logic. Per issue #29 (owner Option C), the
+ * vetted `react-native-quick-crypto` native module is installed exactly once
+ * at the entrypoint (`mobile/cryptoPolyfill.js`, loaded by `mobile/App.js`)
+ * and never imported from business-logic modules.
  */
 
 import { describe, it } from 'node:test';
@@ -69,5 +73,34 @@ describe('Issue #19: Mobile Runtime Compatibility (Zero node:* & Zero Buffer)', 
     }
 
     assert.deepEqual(violations, [], `Found forbidden Buffer references:\n${violations.join('\n')}`);
+  });
+
+  it('installs the vetted WebCrypto polyfill exactly once at the entrypoint (issue #29)', () => {
+    const mobileDir = path.resolve(__dirname, '..');
+    const entryFiles = {
+      app: fs.readFileSync(path.join(mobileDir, 'App.js'), 'utf8'),
+      polyfill: fs.readFileSync(path.join(mobileDir, 'cryptoPolyfill.js'), 'utf8'),
+    };
+    assert.match(entryFiles.polyfill, /react-native-quick-crypto/);
+    assert.match(entryFiles.app, /cryptoPolyfill/);
+    const installers = [entryFiles.app, entryFiles.polyfill].filter((content) =>
+      /quick-crypto|installCryptoPolyfill/.test(content)
+    );
+    assert.equal(installers.length, 2);
+
+    const businessLogicViolations = [];
+    for (const file of collectSourceFiles(MOBILE_SRC_DIR)) {
+      const content = fs.readFileSync(file, 'utf8');
+      content.split(/\r?\n/).forEach((line, idx) => {
+        if (/quick-crypto|cryptoPolyfill/.test(line)) {
+          businessLogicViolations.push(`${path.relative(mobileDir, file)}:${idx + 1}: ${line.trim()}`);
+        }
+      });
+    }
+    assert.deepEqual(
+      businessLogicViolations,
+      [],
+      `Business logic must not import the crypto polyfill directly:\n${businessLogicViolations.join('\n')}`
+    );
   });
 });
