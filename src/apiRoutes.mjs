@@ -3,11 +3,8 @@
  * Keeps `src/server.mjs` concise and well under the 300-line modularity boundary.
  */
 
-import {
-  createPasskeyChallenge,
-  registerPasskeyCredential,
-  verifyPasskeyAssertionAndIssueSession,
-} from './passkeySession.mjs';
+import { verifyAppSessionCookie } from './sessionCookie.mjs';
+import { handlePasskeyAuthRoutes } from './passkeyRoutes.mjs';
 import {
   discoverContactsViaNode,
   createLiveKitRoomToken,
@@ -74,117 +71,6 @@ export function prefersJson(req) {
 }
 
 /**
- * Handles WebAuthn Passkey challenge and assertion verification routes.
- *
- * @param {import('node:http').IncomingMessage} req - Incoming HTTP request.
- * @param {import('node:http').ServerResponse} res - Outgoing HTTP response.
- * @param {URL} url - Parsed request URL.
- * @param {{ challengeStore: Map<string, any>, registrationStore?: Map<string, any>, credentialStore?: Map<string, any>, sessionSecret: string }} authCtx - Passkey auth state.
- * @returns {Promise<boolean>} True if the route was handled.
- */
-export async function handlePasskeyAuthRoutes(req, res, url, authCtx) {
-  if (req.method === 'POST' && url.pathname === '/auth/passkey/challenge') {
-    const body = await readRequestBody(req);
-    const userDid = String(body.userDid || 'did:sonaraim:default-user').trim();
-    try {
-      const issued = createPasskeyChallenge(userDid, authCtx.challengeStore, {
-        rpId: body.rpId,
-        origin: body.origin,
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(issued));
-    } catch (err) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return true;
-  }
-
-  if (req.method === 'POST' && url.pathname === '/auth/passkey/register/challenge') {
-    const body = await readRequestBody(req);
-    const userDid = String(body.userDid || 'did:sonaraim:default-user').trim();
-    try {
-      const issued = createPasskeyChallenge(userDid, authCtx.registrationStore, {
-        rpId: body.rpId,
-        origin: body.origin,
-      });
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(issued));
-    } catch (err) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return true;
-  }
-
-  if (req.method === 'POST' && url.pathname === '/auth/passkey/register') {
-    const body = await readRequestBody(req);
-    try {
-      const challengeId = String(body.challengeId ?? '');
-      const pending = authCtx.registrationStore?.get(challengeId);
-      if (!pending) {
-        throw new Error('Passkey registration challenge not found or already consumed');
-      }
-      authCtx.registrationStore.delete(challengeId);
-      const registered = registerPasskeyCredential({
-        userDid: String(body.userDid ?? ''),
-        credentialId: String(body.credentialId ?? body.rawId ?? ''),
-        attestationObject: String(body.attestationObject ?? ''),
-        clientDataJSON: String(body.clientDataJSON ?? ''),
-        challengeB64: String(pending.challenge ?? ''),
-        expectedRpId: pending.rpId,
-        expectedOrigin: pending.origin,
-        credentialStore: authCtx.credentialStore,
-      });
-      res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ status: 'registered', ...registered }));
-    } catch (err) {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return true;
-  }
-
-  if (req.method === 'POST' && url.pathname === '/auth/passkey/verify') {
-    const body = await readRequestBody(req);
-    try {
-      const session = verifyPasskeyAssertionAndIssueSession({
-        challengeId: String(body.challengeId ?? ''),
-        challenge: body.challenge !== undefined ? String(body.challenge ?? '') : undefined,
-        userDid: String(body.userDid ?? ''),
-        credentialId: String(body.credentialId ?? body.rawId ?? ''),
-        authenticatorData: String(body.authenticatorData ?? ''),
-        clientDataJSON: String(body.clientDataJSON ?? ''),
-        assertionSignature: String(body.assertionSignature ?? body.signature ?? ''),
-        publicKeyRaw: String(body.publicKeyRaw ?? body.publicKey ?? ''),
-        challengeStore: authCtx.challengeStore,
-        credentialStore: authCtx.credentialStore,
-        sessionSecret: authCtx.sessionSecret,
-        rpId: body.rpId,
-        origin: body.origin,
-      });
-      res.writeHead(200, {
-        'Content-Type': 'application/json',
-        'Set-Cookie': session.cookieHeader,
-      });
-      res.end(
-        JSON.stringify({
-          status: 'authenticated',
-          userDid: session.userDid,
-          expiresAt: session.expiresAt,
-        })
-      );
-    } catch (err) {
-      res.writeHead(401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return true;
-  }
-
-  return false;
-}
-
-/**
  * Handles PSI contact discovery (`/api/contacts/discover`) and LiveKit room token (`/api/calls/token`) routes.
  *
  * @param {import('node:http').IncomingMessage} req - Incoming HTTP request.
@@ -235,19 +121,35 @@ export async function handleDiscoveryAndCallRoutes(req, res, url, ctx) {
 
 /**
  * Handles sending live P2P messages to a Sonaraim Node relay via `POST /inbox/messages`.
+ * The sender identity is bound to the session cookie: an explicit mismatched
+ * `senderDid` is rejected (issue #26) and never forwarded to the relay.
  *
  * @param {import('node:http').IncomingMessage} req - Incoming HTTP request.
  * @param {import('node:http').ServerResponse} res - Outgoing HTTP response.
  * @param {URL} url - Parsed request URL.
- * @param {{ nodeApiBaseUrl: string }} ctx - App runtime context.
+ * @param {{ nodeApiBaseUrl: string, sessionSecret: string }} ctx - App runtime context.
  * @returns {Promise<boolean>} True if the route was handled.
  */
 export async function handleInboxMessageRoutes(req, res, url, ctx) {
   if (req.method === 'POST' && url.pathname === '/inbox/messages') {
+    const sessionCheck = verifyAppSessionCookie(req.headers.cookie, ctx.sessionSecret);
+    if (!sessionCheck.valid) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unauthorized', reason: sessionCheck.reason }));
+      return true;
+    }
     const body = await readRequestBody(req);
-    const senderDid = String(body.senderDid || body.sender_did || 'did:sonaraim:user').trim();
+    const claimedSender = String(body.senderDid || body.sender_did || '').trim();
+    if (claimedSender && claimedSender !== sessionCheck.userDid) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'senderDid mismatch: sender is bound to the session identity' }));
+      return true;
+    }
+    const senderDid = sessionCheck.userDid;
     const recipientDid = String(body.recipientDid || body.recipient_did || '').trim();
     const text = String(body.text || body.preview || '').trim();
+    const mediaPointer =
+      body.mediaPointer && typeof body.mediaPointer === 'object' ? body.mediaPointer : null;
 
     if (!recipientDid) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -260,6 +162,7 @@ export async function handleInboxMessageRoutes(req, res, url, ctx) {
         senderDid,
         recipientDid,
         text,
+        ...(mediaPointer ? { mediaPointer } : {}),
       });
 
       if (prefersJson(req)) {

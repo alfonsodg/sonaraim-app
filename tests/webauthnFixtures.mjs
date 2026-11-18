@@ -270,3 +270,74 @@ export async function registerFixtureCredential({ userDid, rpId, origin, credent
   });
   return { ...registered, privateKey };
 }
+
+/**
+ * Issues a real session cookie via register + assert ceremony (HTTP).
+ *
+ * @param {string} baseUrl - Test server base URL.
+ * @param {string} userDid - User DID to authenticate.
+ * @param {Function} httpRequest - Local HTTP helper.
+ * @param {Function} assertEqual - Strict equal assertion.
+ * @returns {Promise<string>} Cookie header value (`name=token`).
+ */
+const FIXTURE_RP_ID = '127.0.0.1';
+const FIXTURE_ORIGIN = 'http://127.0.0.1';
+
+export async function issueSessionCookieHttp(baseUrl, userDid, httpRequest, assertEqual) {
+const RP_ID = FIXTURE_RP_ID;
+const ORIGIN = FIXTURE_ORIGIN;
+  const regChallengeRes = await httpRequest(`${baseUrl}/auth/passkey/register/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userDid, rpId: RP_ID, origin: ORIGIN }),
+  });
+  assertEqual(regChallengeRes.status, 200);
+  const regChallenge = JSON.parse(regChallengeRes.body);
+
+  const key = await generateEd25519FixtureKey();
+  const cose = buildCoseFixtureKey(key.publicKeyRawB64);
+  const credId = Buffer.from(`http-cred-${userDid}-${Date.now()}`).toString('base64url');
+  const authData = await buildAttestationAuthData({
+    rpId: regChallenge.rpId,
+    credentialIdB64: credId,
+    coseKeyBytes: cose,
+  });
+  const regRes = await httpRequest(`${baseUrl}/auth/passkey/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      challengeId: regChallenge.challengeId,
+      userDid,
+      credentialId: credId,
+      attestationObject: buildAttestationObject(authData),
+      clientDataJSON: buildRegistrationClientData(regChallenge.challenge, regChallenge.origin),
+    }),
+  });
+  assertEqual(regRes.status, 201);
+
+  const challengeRes = await httpRequest(`${baseUrl}/auth/passkey/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userDid, rpId: RP_ID, origin: ORIGIN }),
+  });
+  assertEqual(challengeRes.status, 200);
+  const challengeData = JSON.parse(challengeRes.body);
+  const assertion = await buildWebauthnAssertion({
+    privateKey: key.privateKey,
+    publicKeyRawB64: key.publicKeyRawB64,
+    rpId: challengeData.rpId,
+    origin: challengeData.origin,
+    challengeB64: challengeData.challenge,
+    counter: 3,
+  });
+  assertion.credentialId = credId;
+  const verifyRes = await httpRequest(`${baseUrl}/auth/passkey/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ challengeId: challengeData.challengeId, userDid, ...assertion }),
+  });
+  assertEqual(verifyRes.status, 200);
+  const setCookie = verifyRes.headers['set-cookie'];
+  const cookieStr = Array.isArray(setCookie) ? setCookie[0] : setCookie;
+  return String(cookieStr).split(';')[0];
+}

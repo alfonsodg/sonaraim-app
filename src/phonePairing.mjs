@@ -4,6 +4,7 @@
  */
 
 import crypto from 'node:crypto';
+import { verifyAppSessionCookie } from './sessionCookie.mjs';
 import { readRequestBody } from './apiRoutes.mjs';
 
 /**
@@ -102,24 +103,40 @@ export function createDevicePairingSession(userDid, options = {}) {
 
 /**
  * Verifies and redeems a 6-digit companion device pairing code.
- *
  * @param {string} pairingCode - 6-digit code.
  * @param {Map<string, any>} pairingStore - In-memory pairing code registry.
+ * @param {{ attemptStore?: Map<string, Array<number>>, maxAttempts?: number, windowMs?: number, nowMs?: number }} [options]
  * @returns {{ valid: boolean, userDid?: string, pairedAt?: string, reason?: string }}
  */
-export function verifyDevicePairingCode(pairingCode, pairingStore) {
+export function verifyDevicePairingCode(pairingCode, pairingStore, options = {}) {
   const code = String(pairingCode ?? '').trim();
   if (!code || !pairingStore || !pairingStore.has(code)) {
     return { valid: false, reason: 'Invalid or non-existent pairing code' };
   }
 
+  const opts = options && typeof options === 'object' ? options : {};
+  const maxAttempts = Number(opts.maxAttempts ?? 10);
+  const windowMs = Number(opts.windowMs ?? 600_000);
+  const now = Number(opts.nowMs ?? Date.now());
+  if (opts.attemptStore instanceof Map) {
+    const history = (opts.attemptStore.get(code) || []).filter((ts) => now - ts < windowMs);
+    if (history.length >= maxAttempts) {
+      return { valid: false, reason: 'Too many pairing attempts, try again later' };
+    }
+    history.push(now);
+    opts.attemptStore.set(code, history);
+  }
+
   const session = pairingStore.get(code);
-  if (Date.now() > session.expiresAtMs) {
+  if (now > session.expiresAtMs) {
     pairingStore.delete(code);
     return { valid: false, reason: 'Pairing code expired' };
   }
 
   pairingStore.delete(code);
+  if (opts.attemptStore instanceof Map) {
+    opts.attemptStore.delete(code);
+  }
   return {
     valid: true,
     userDid: session.userDid,
@@ -161,11 +178,13 @@ export function buildPwaManifest() {
 
 /**
  * Handles phone registration, companion device pairing, and webmanifest endpoints.
+ * Redeeming a 6-digit code requires an authenticated session whose DID matches
+ * the pairing owner, and failed guesses are attempt-limited (issue #26).
  *
  * @param {import('node:http').IncomingMessage} req
  * @param {import('node:http').ServerResponse} res
  * @param {URL} url
- * @param {{ nodeApiBaseUrl: string, pairingStore: Map<string, any> }} ctx
+ * @param {{ nodeApiBaseUrl: string, pairingStore: Map<string, any>, pairingAttemptStore?: Map<string, Array<number>>, pairingAttemptLimiter?: { checkAndRecord: Function }, sessionSecret: string }} ctx
  * @returns {Promise<boolean>} True if route was handled.
  */
 export async function handlePhoneAndDeviceRoutes(req, res, url, ctx) {
@@ -194,10 +213,36 @@ export async function handlePhoneAndDeviceRoutes(req, res, url, ctx) {
     const pairingCode = String(body.pairingCode ?? body.code ?? '').trim();
 
     if (pairingCode) {
-      const verified = verifyDevicePairingCode(pairingCode, ctx.pairingStore);
+      const sessionCheck = verifyAppSessionCookie(req.headers.cookie, ctx.sessionSecret);
+      if (!sessionCheck.valid) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'unauthorized', reason: sessionCheck.reason }));
+        return true;
+      }
+      const clientIp = String(req.headers['x-forwarded-for'] ?? req.socket?.remoteAddress ?? 'unknown')
+        .split(',')[0]
+        .trim();
+      const limiter = ctx.pairingAttemptLimiter;
+      if (limiter && typeof limiter.checkAndRecord === 'function') {
+        const gate = limiter.checkAndRecord(`${clientIp}:${pairingCode}`);
+        if (!gate.allowed) {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Too many pairing attempts, try again later' }));
+          return true;
+        }
+      }
+      const verified = verifyDevicePairingCode(pairingCode, ctx.pairingStore, {
+        attemptStore: ctx.pairingAttemptStore,
+      });
       if (!verified.valid) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
+        const status = verified.reason === 'Too many pairing attempts, try again later' ? 429 : 400;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: verified.reason }));
+        return true;
+      }
+      if (verified.userDid !== sessionCheck.userDid) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'pairing code owner mismatch for this session' }));
         return true;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -205,7 +250,18 @@ export async function handlePhoneAndDeviceRoutes(req, res, url, ctx) {
       return true;
     }
 
-    const userDid = String(body.userDid || 'did:sonaraim:user').trim();
+    const sessionCheck = verifyAppSessionCookie(req.headers.cookie, ctx.sessionSecret);
+    if (!sessionCheck.valid) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'unauthorized', reason: sessionCheck.reason }));
+      return true;
+    }
+    const userDid = String(body.userDid || sessionCheck.userDid || 'did:sonaraim:user').trim();
+    if (userDid !== sessionCheck.userDid) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'pairing owner mismatch for this session' }));
+      return true;
+    }
     const session = createDevicePairingSession(userDid, { pairingStore: ctx.pairingStore });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'created', ...session }));
