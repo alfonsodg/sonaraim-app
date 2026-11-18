@@ -1,7 +1,7 @@
 {
   "name": "@sonaraim/mobile",
   "version": "0.1.0",
-  "description": "SonarAIM React Native Expo Mobile Application \u2014 Dual Inbox, Zero-HTML Declarative Cards, and LiveKit E2E Calling",
+  "description": "SonarAIM React Native Expo Mobile Application \u2014 Dual Inbox, Zero-HTML Declarative Cards, and external LiveKit Meet call fallback",
   "main": "App.js",
   "scripts": {
     "start": "expo start",
@@ -22,7 +22,7 @@
     "expo-status-bar": "~1.12.1",
     "react": "18.2.0",
     "react-native": "0.74.5",
-    "react-native-quick-crypto": "^1.1.10"
+    "react-native-quick-crypto": "1.1.10"
   },
   "license": "Apache-2.0"
 }
