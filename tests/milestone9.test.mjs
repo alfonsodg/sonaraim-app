@@ -71,7 +71,7 @@ test('Issue #5: renderInstantClipView renders accessible POST /c/:token/act form
 
   assert.match(formHtml, /<form[^>]*method="POST"[^>]*action="\/c\/clip_900\/act"/i);
   assert.match(formHtml, /<button[^>]*type="submit"[^>]*>/i);
-  assert.match(formHtml, /<link rel="icon" href="data:," \/>/);
+  assert.match(formHtml, /<link rel="icon"[^>]*\/icon-192\.png/);
 
   const confirmedHtml = renderInstantClipView({
     token: 'clip_900',
