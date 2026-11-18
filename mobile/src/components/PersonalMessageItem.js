@@ -55,6 +55,7 @@ export function PersonalMessageItem({ msg, onToggleReaction, onQuoteReply }) {
           <Text style={styles.mediaBadgeText}>
             📎 {msg.mediaPointer.type || 'attachment'}:{' '}
             {msg.mediaPointer.fileName || msg.mediaPointer.name || 'encrypted'}
+            {msg.decryptedBytes ? ` (${msg.decryptedBytes} bytes decrypted)` : ''}
           </Text>
         </View>
       ) : null}

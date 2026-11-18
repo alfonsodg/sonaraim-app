@@ -7,6 +7,7 @@ import { pickMediaAsset, startVoiceRecording } from './nativeDeviceBridge.js';
 import {
   createMediaPointer,
   encryptMediaBuffer,
+  fetchAndDecryptMediaPointer,
   requestPresignedUpload,
 } from './mediaCrypto.js';
 
@@ -128,4 +129,56 @@ export async function processMediaAttachment({
   });
 
   return { cancelled: false, mediaPointer };
+}
+
+/**
+ * Drains incoming mailbox envelopes carrying E2EE media pointers, fetching and
+ * decrypting each attachment. Envelopes without pointers resolve with
+ * `decrypted: null`; failures resolve with `error` instead of throwing so one
+ * bad blob never blocks the inbox drain (issue #27).
+ *
+ * @param {{
+ *   envelopes: Array<Record<string, any>>,
+ *   fetchFn?: typeof fetch
+ * }} params - Drain inputs.
+ * @returns {Promise<Array<{ envelopeId: string, pointer: Record<string, any> | null, bytes: Uint8Array | null, mimeType: string | null, error: string | null }>>}
+ */
+export async function drainIncomingMedia({ envelopes, fetchFn = globalThis.fetch }) {
+  const list = Array.isArray(envelopes) ? envelopes : [];
+  const results = [];
+  for (const env of list) {
+    const entry = env && typeof env === 'object' ? env : {};
+    const pointer =
+      entry.mediaPointer && typeof entry.mediaPointer === 'object'
+        ? entry.mediaPointer
+        : entry.decodedPayload?.mediaPointer && typeof entry.decodedPayload.mediaPointer === 'object'
+          ? entry.decodedPayload.mediaPointer
+          : null;
+    const envelopeId = String(
+      entry.envelope_id ?? entry.envelopeId ?? entry.id ?? pointer?.sha256 ?? 'unknown'
+    );
+    if (!pointer) {
+      results.push({ envelopeId, pointer: null, bytes: null, mimeType: null, error: null });
+      continue;
+    }
+    try {
+      const decrypted = await fetchAndDecryptMediaPointer(pointer, { fetchFn });
+      results.push({
+        envelopeId,
+        pointer,
+        bytes: decrypted.bytes,
+        mimeType: decrypted.mimeType,
+        error: null,
+      });
+    } catch (err) {
+      results.push({
+        envelopeId,
+        pointer,
+        bytes: null,
+        mimeType: null,
+        error: err?.message || 'media drain failed',
+      });
+    }
+  }
+  return results;
 }

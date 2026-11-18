@@ -7,6 +7,8 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
 import { apiClient } from '../apiClient.js';
+import { drainIncomingMedia } from '../mediaComposerLogic.js';
+import { summarizeMediaDrain } from '../mailboxSync.js';
 import { validateDeclarativeCard } from '../cardValidator.js';
 import { MediaComposer } from '../components/MediaComposer.js';
 import { PersonalMessageItem } from '../components/PersonalMessageItem.js';
@@ -23,6 +25,7 @@ import { inboxStyles as styles } from '../styles/inboxStyles.js';
  * }} [props]
  * @returns {React.ReactElement} Rendered Dual Inbox screen.
  */
+
 export function InboxScreen({
   currentUserDid = 'did:sonaraim:mobile-user',
   initialPersonalMessages = [],
@@ -68,7 +71,8 @@ export function InboxScreen({
   const [error, setError] = useState('');
 
   /**
-   * Refreshes mailbox messages from the node relay.
+   * Refreshes mailbox messages from the node relay, draining incoming E2EE
+   * media pointers (fetch + decrypt) so attachments render decrypted (issue #27).
    */
   async function handleRefreshMailbox() {
     setLoading(true);
@@ -76,8 +80,17 @@ export function InboxScreen({
     setActionFeedback('');
     try {
       const data = await apiClient.fetchInboxMailbox(currentUserDid);
-      const count = Array.isArray(data.items) ? data.items.length : 0;
-      setActionFeedback(count > 0 ? `Retrieved ${count} live item(s)` : 'Mailbox is up to date (0 new items)');
+      const envelopes = Array.isArray(data.envelopes)
+        ? data.envelopes
+        : Array.isArray(data.items)
+          ? data.items
+          : [];
+      const drained = await drainIncomingMedia({ envelopes });
+      const { incoming, feedback } = summarizeMediaDrain(drained, envelopes.length);
+      if (incoming.length > 0) {
+        setPersonalMessages((prev) => [...incoming, ...prev]);
+      }
+      setActionFeedback(feedback);
     } catch (err) {
       setError(err.message || 'Failed to refresh mailbox');
     } finally {
@@ -122,6 +135,7 @@ export function InboxScreen({
         senderDid: currentUserDid,
         recipientDid: recipientDid.trim(),
         text,
+        ...(mediaPointer ? { mediaPointer } : {}),
       });
 
       setPersonalMessages((prev) => [newMsg, ...prev]);

@@ -195,6 +195,48 @@ export async function requestPresignedUpload({
 }
 
 /**
+ * Fetches an encrypted blob from a media pointer URL and decrypts it with the
+ * pointer key material (AES-256-GCM). Verifies the SHA-256 of the ciphertext
+ * against the pointer digest when present.
+ *
+ * @param {Record<string, any>} mediaPointer - Canonical `encrypted_media_pointer_v1`.
+ * @param {{ fetchFn?: typeof fetch }} [options]
+ * @returns {Promise<{ bytes: Uint8Array, mimeType: string, pointer: Record<string, any> }>}
+ * @throws {Error} If the pointer is malformed, the fetch fails, or auth fails.
+ */
+export async function fetchAndDecryptMediaPointer(mediaPointer, { fetchFn = globalThis.fetch } = {}) {
+  const pointer = mediaPointer && typeof mediaPointer === 'object' ? mediaPointer : null;
+  if (!pointer || pointer.type !== 'encrypted_media_pointer_v1') {
+    throw new Error('Invalid media pointer: expected encrypted_media_pointer_v1');
+  }
+  const mediaUrl = String(pointer.mediaUrl || '').trim();
+  if (!mediaUrl) {
+    throw new Error('Invalid media pointer: missing mediaUrl');
+  }
+  for (const field of ['sha256', 'keyHex', 'ivHex', 'authTagHex']) {
+    if (!String(pointer[field] || '').trim()) {
+      throw new Error(`Invalid media pointer: missing ${field}`);
+    }
+  }
+  const res = await fetchFn(mediaUrl, { method: 'GET', headers: { Accept: 'application/octet-stream' } });
+  if (!res.ok) {
+    throw new Error(`Media fetch failed: HTTP ${res.status}`);
+  }
+  const raw = new Uint8Array(await res.arrayBuffer());
+  const actualDigest = await sha256Hex(raw);
+  if (actualDigest !== String(pointer.sha256).toLowerCase()) {
+    throw new Error('Media integrity check failed: sha256 mismatch');
+  }
+  const bytes = await decryptMediaBuffer({
+    ciphertext: raw,
+    authTagHex: String(pointer.authTagHex),
+    keyHex: String(pointer.keyHex),
+    ivHex: String(pointer.ivHex),
+  });
+  return { bytes, mimeType: String(pointer.mimeType || 'application/octet-stream'), pointer };
+}
+
+/**
  * Returns available emoji items for quick reactions and insertion.
  *
  * @returns {ReadonlyArray<string>} Emoji list.

@@ -201,7 +201,11 @@ export function createAppRequestHandler(config = {}) {
             const preview = String(
               payload?.text ?? env.preview ?? env.ciphertext_b64 ?? env.envelope_id ?? 'Queued MLS envelope'
             );
-            personalMessages.push({ from, preview });
+            const mediaPointer =
+              payload?.mediaPointer && typeof payload.mediaPointer === 'object'
+                ? payload.mediaPointer
+                : null;
+            personalMessages.push({ from, preview, ...(mediaPointer ? { mediaPointer } : {}) });
           }
         }
       }

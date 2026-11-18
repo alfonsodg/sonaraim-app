@@ -5,6 +5,7 @@
  */
 
 import { resolveMobileConfig, requireMobileEnvUrl } from './config.js';
+import { normalizeMailboxResult } from './mailboxSync.js';
 
 /**
  * Normalizes an international phone number to strict E.164 format.
@@ -145,6 +146,9 @@ export function createApiClient(customConfig = {}, dependencies = {}) {
 
     /**
      * Fetches mailbox envelopes / items for a given DID or mailbox identifier.
+     * Normalizes node (`items`) and app-proxy (`envelopes`) shapes: each
+     * envelope exposes `decodedPayload` (parsed `payload_hex` JSON) and
+     * `mediaPointer` (payload media pointer when present, issue #27).
      *
      * @param {string} mailboxId - Target mailbox DID.
      * @returns {Promise<{ mailbox_id?: string, items?: Array<any>, envelopes?: Array<any> }>}
@@ -154,11 +158,11 @@ export function createApiClient(customConfig = {}, dependencies = {}) {
       // Try node API endpoint first, fallback to app server /api/mailbox/:id
       const primaryUrl = `${config.nodeApiUrl}/api/mailbox/${id}`;
       try {
-        return await requestJson(primaryUrl, { method: 'GET' });
+        return normalizeMailboxResult(await requestJson(primaryUrl, { method: 'GET' }));
       } catch (err) {
         // Fallback to app server proxy
         const fallbackUrl = `${config.appApiUrl}/api/mailbox/${id}`;
-        return requestJson(fallbackUrl, { method: 'GET' });
+        return normalizeMailboxResult(await requestJson(fallbackUrl, { method: 'GET' }));
       }
     },
 
