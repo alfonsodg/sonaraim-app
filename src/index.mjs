@@ -62,6 +62,10 @@ export {
 
 export { mintSessionCookie, verifyAppSessionCookie } from './sessionCookie.mjs';
 
+export { isVerifiedWebService, handleDirectoryRoutes } from './directoryRoutes.mjs';
+
+export { deriveServerVaultKey, handleVaultRoutes } from './vaultRoutes.mjs';
+
 export { registerPasskeyCredential } from './passkeyRegistration.mjs';
 
 export {

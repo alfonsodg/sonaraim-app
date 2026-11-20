@@ -12,6 +12,7 @@ import { summarizeMediaDrain } from '../mailboxSync.js';
 import { validateDeclarativeCard } from '../cardValidator.js';
 import { MediaComposer } from '../components/MediaComposer.js';
 import { PersonalMessageItem } from '../components/PersonalMessageItem.js';
+import { ServiceCardItem } from '../components/ServiceCardItem.js';
 import { toggleReaction, buildQuoteReply, sendRelaySignal } from '../chatFeatures.js';
 import { inboxStyles as styles } from '../styles/inboxStyles.js';
 
@@ -274,26 +275,7 @@ export function InboxScreen({
       ) : (
         <View>
           {serviceCards.map((card) => (
-            <View key={card.id || card.title} style={styles.serviceCard}>
-              <View style={styles.serviceHeader}>
-                <Text style={styles.serviceTitle}>{card.title}</Text>
-                <Text style={styles.verifiedBadge}>VERIFIED</Text>
-              </View>
-              <Text style={styles.serviceTenant}>{card.tenantDid}</Text>
-              {card.summary ? <Text style={styles.serviceSummary}>{card.summary}</Text> : null}
-
-              <View style={styles.actionRow}>
-                {(card.actions || []).map((action) => (
-                  <TouchableOpacity
-                    key={action.id}
-                    style={styles.cardActionButton}
-                    onPress={() => handleCardAction(card, action)}
-                  >
-                    <Text style={styles.cardActionText}>{action.label}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+            <ServiceCardItem key={card.id || card.title} card={card} onCardAction={handleCardAction} />
           ))}
         </View>
       )}
