@@ -1,6 +1,8 @@
 /**
- * @fileoverview WebRTC in-app call controls for `@livekit/react-native` and external Meet fallback.
- * Provides controls for mute/unmute, camera toggle, camera flip, and speakerphone.
+ * @fileoverview Call control buttons for the external LiveKit Meet fallback
+ * (issue #29: no in-app WebRTC engine is embedded; `@livekit/react-native`
+ * remains roadmap). Provides mute/unmute, camera toggle, camera flip, and
+ * speakerphone UI state dispatched to `callControlsLogic.js`.
  */
 
 import React from 'react';
