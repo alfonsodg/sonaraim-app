@@ -24,6 +24,7 @@ RUN addgroup -S sonaraim && adduser -S sonaraim -G sonaraim
 
 COPY --from=builder --chown=sonaraim:sonaraim /workspace/package.json ./package.json
 COPY --from=builder --chown=sonaraim:sonaraim /workspace/src ./src
+COPY --from=builder --chown=sonaraim:sonaraim /workspace/public ./public
 
 USER sonaraim
 
